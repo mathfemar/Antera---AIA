@@ -1,0 +1,5 @@
+v1.0.2 - Consertar Write-Off
+
+v1.0.3 - Implementar Fair Value em "Crescimento Necessário por Empresa (IPCA+6%)"
+
+v1.0.4 - 
