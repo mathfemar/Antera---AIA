@@ -2,4 +2,8 @@ v1.0.2 - Consertar Write-Off
 
 v1.0.3 - Implementar Fair Value em "Crescimento Necessário por Empresa (IPCA+6%)"
 
-v1.0.4 - 
+v1.0.4 - Passar gráfico de participação para cascata, Tabela seção 1 múltiplo de venda da empresa ou valor de venda
+
+v1.0.5 - Correção FV para FV * Participação
+
+v1.0.6 - Gráfico grande no tempo de Hurdle (W/M/Y)

@@ -4,6 +4,7 @@ import numpy as np
 from datetime import datetime
 import os
 import requests
+import time
 import plotly.graph_objects as go
 import plotly.express as px
 
@@ -11,6 +12,19 @@ import plotly.express as px
 def format_brazil(value):
     formatted = f"{value:,.2f}"
     return formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
+
+# Função callback que atualiza o "Múltiplo" na tabela global a partir do number_input
+def update_multiplo():
+    comp = st.session_state["select_company"]
+    new_val = st.session_state[f"num_{comp}"]
+    st.session_state.edited_df.loc[st.session_state.edited_df["Empresa"] == comp, "Múltiplo"] = new_val
+
+# Função callback que atualiza o "Múltiplo" na tabela global a partir do slider, com atraso de 1 segundo
+def update_multiplo_slider():
+    time.sleep(1)
+    comp = st.session_state["select_company"]
+    new_val = st.session_state[f"slider_{comp}"]
+    st.session_state.edited_df.loc[st.session_state.edited_df["Empresa"] == comp, "Múltiplo"] = new_val
 
 # ---------------------------------------------------------------
 # Configurações e Funções Auxiliares
@@ -23,16 +37,12 @@ def carregar_dados():
     try:
         caminho_fair_value = os.path.join(DIRETORIO_DADOS, 'fair_value.xlsx')
         caminho_investimentos = os.path.join(DIRETORIO_DADOS, 'investimentos.xlsx')
-        
         # Ler fair_value.xlsx
         fair_value = pd.read_excel(caminho_fair_value)
-        # Ler investimentos.xlsx convertendo a coluna "Write-off" para booleano
-        investimentos = pd.read_excel(
-            caminho_investimentos, 
-            converters={
-                'Write-off': lambda x: True if str(x).strip() in ['1', 'True', 'true'] else False
-            }
-        )
+        # Ler investimentos.xlsx; se a coluna "Múltiplo" não existir, cria com valor padrão 1.0
+        investimentos = pd.read_excel(caminho_investimentos)
+        if 'Múltiplo' not in investimentos.columns:
+            investimentos['Múltiplo'] = 1.0
         return fair_value, investimentos
     except FileNotFoundError as e:
         st.error(f"❌ Erro ao carregar os arquivos: {e}")
@@ -100,7 +110,7 @@ st.set_page_config(page_title="Primatech Investment Analyzer", layout="wide")
 st.title("📊 Primatech Investment Analyzer")
 
 # Slider para Hurdle e IPCA + X%
-hurdle = st.slider("Taxa de Correção (IPCA + %)", 0.0, 15.0, 6.0, 0.5)
+hurdle = st.slider("Taxa de Correção (IPCA + %)", 0.0, 15.0, 9.0, 0.5)
 
 # ---------------------------------------------------------------
 # Carregamento dos Dados
@@ -108,75 +118,93 @@ hurdle = st.slider("Taxa de Correção (IPCA + %)", 0.0, 15.0, 6.0, 0.5)
 fair_value, investimentos = carregar_dados()
 
 if fair_value is not None and investimentos is not None:
+    # Cria o DataFrame a partir da planilha (usando a coluna "Múltiplo")
+    df_empresas = investimentos[[
+        'Múltiplo',
+        'Empresa',
+        'Valor Investido até a presente data (R$ mil)',
+        'Participação do Fundo (%)',
+        'Data do Primeiro Investimento'
+    ]].copy()
+    df_empresas.rename(columns={'Valor Investido até a presente data (R$ mil)': 'Valor Investido'}, inplace=True)
+    
+    # Se ainda não estiver em session_state, inicializa a tabela editável
+    if 'edited_df' not in st.session_state:
+        st.session_state.edited_df = df_empresas.copy()
+    
     # -----------------------------------------------------------
-    # COLUNA 1: Tabela (sem scroll) e Placeholder para novo componente
+    # COLUNA 1: Tabela (sem scroll) + Configuração de Múltiplo
     # -----------------------------------------------------------
     col1, col2 = st.columns([2, 1])
     
     with col1:
         st.subheader("Empresas do Portfólio")
-        
-        # Seleciona as colunas desejadas do arquivo de investimentos
-        df_empresas = investimentos[[
-            'Write-off',
-            'Empresa',
-            'Valor Investido até a presente data (R$ mil)',
-            'Participação do Fundo (%)',
-            'Data do Primeiro Investimento'
-        ]].copy()
-        df_empresas.rename(columns={
-            'Valor Investido até a presente data (R$ mil)': 'Valor Investido'
-        }, inplace=True)
-        
-        # Garante que a coluna "Write-off" seja booleana
-        df_empresas['Write-off'] = df_empresas['Write-off'].apply(lambda x: bool(x))
-        
-        # Cria duas colunas internas: uma para a tabela e outra para o placeholder (tabela vazia)
-        col_table, col_placeholder = st.columns([2, 2], gap="small")
+        # Cria duas colunas lado a lado: a tabela e o configurador
+        col_table, col_placeholder = st.columns([1, 1], gap="small")
         
         with col_table:
             edited_df = st.data_editor(
-                df_empresas,
+                st.session_state.edited_df,
                 column_config={
-                    "Write-off": st.column_config.CheckboxColumn("Write-off", width=80),
+                    "Múltiplo": st.column_config.NumberColumn("Múltiplo", format="%.2fx", min_value=0.0, max_value=100.0, width=80),
                     "Empresa": st.column_config.TextColumn("Empresa", width=120),
                     "Valor Investido": st.column_config.NumberColumn("Valor Investido", format="%.2f"),
                     "Participação do Fundo (%)": st.column_config.NumberColumn("Participação do Fundo (%)", format="%.2f"),
                     "Data do Primeiro Investimento": st.column_config.TextColumn("Data do Primeiro Investimento")
                 },
-                use_container_width=True
+                use_container_width=True,
+                key="table_edit"
+            )
+            st.session_state.edited_df = edited_df
+        with col_placeholder:
+            st.markdown("## Configurar Múltiplo")
+            company_selected = st.selectbox(
+                "Selecione a empresa para alterar o múltiplo",
+                options=edited_df["Empresa"].unique(),
+                key="select_company"
+            )
+            current_value = float(edited_df.loc[edited_df["Empresa"] == company_selected, "Múltiplo"].iloc[0])
+            new_mult = st.number_input(
+                f"Múltiplo para {company_selected}",
+                min_value=0.0,
+                max_value=100.0,
+                value=current_value,
+                step=0.1,
+                key=f"num_{company_selected}",
+                format="%.1f",
+                on_change=update_multiplo
+            )
+            slider_val = st.slider(
+                f"Ajuste (Slider) para {company_selected}",
+                min_value=0.0,
+                max_value=50.0,
+                value=current_value,
+                step=1.0,
+                key=f"slider_{company_selected}",
+                format="%.1f",
+                on_change=update_multiplo_slider
             )
         
-        with col_placeholder:
-            st.markdown("**Placeholder para nova Tabela/Gráfico**")
-            st.dataframe(pd.DataFrame(), height=200)
-        
-        # -----------------------------------------------------------
-        # Crescimento Necessário por Empresa (IPCA+6%) – somente para empresas ativas
-        # -----------------------------------------------------------
+        st.markdown("---")
         st.subheader("📈 Crescimento Necessário por Empresa (IPCA+6%)")
         col_table2, col_graph = st.columns([1, 1])
         
-        # Filtra apenas as empresas ativas (sem Write-off)
-        active_investments = edited_df[edited_df['Write-off'] == False].copy()
-        
+        # Filtra investimentos com Múltiplo > 0
+        active_investments = st.session_state.edited_df[st.session_state.edited_df['Múltiplo'] > 0].copy()
         analise_crescimento = pd.DataFrame()
-        # Recalcula o valor total investido considerando apenas empresas ativas
         valor_total_carteira = active_investments['Valor Investido'].sum()
         
-        # Para cada empresa ativa, calcula os indicadores e busca o Fair Value
         for _, row in active_investments.iterrows():
             valor_investido = row['Valor Investido']
             valor_necessario = corrigir_ipca(valor_investido, row['Data do Primeiro Investimento'], adicional=6.0)
-            # Busca o Fair Value da empresa no DataFrame fair_value (comparação em caixa alta)
             fair_val_match = fair_value.loc[fair_value['Empresa'].str.upper() == row['Empresa'].strip().upper()]
             if not fair_val_match.empty:
                 fair_val_val = fair_val_match.iloc[0]['Valor Primatec (R$ mil)']
             else:
                 fair_val_val = np.nan
-            # Calcula o uplift relativo ao Fair Value
             uplift_percent = ((valor_necessario - fair_val_val) / fair_val_val * 100) if fair_val_val and fair_val_val != 0 else np.nan
             peso_carteira = (valor_investido / valor_total_carteira * 100) if valor_total_carteira != 0 else 0
+            multiplicador = row['Múltiplo']
             
             analise_crescimento = pd.concat([analise_crescimento, pd.DataFrame({
                 'Empresa': [row['Empresa']],
@@ -184,7 +212,9 @@ if fair_value is not None and investimentos is not None:
                 'Fair Value': [fair_val_val],
                 'IPCA+6%: Valor': [valor_necessario],
                 'Crescimento Necessário (%)': [uplift_percent],
-                'Peso na Carteira (%)': [peso_carteira]
+                'Peso na Carteira (%)': [peso_carteira],
+                'Participação do Fundo (%)': [row['Participação do Fundo (%)']],
+                'Múltiplo': [multiplicador]
             })])
         
         with col_table2:
@@ -194,143 +224,115 @@ if fair_value is not None and investimentos is not None:
         
         with col_graph:
             st.markdown("**Análise Gráfica - Uplift Necessário**")
-            empresa_sel = st.selectbox(
-                "Selecione uma empresa",
-                analise_crescimento['Empresa']
-            )
-            linha = analise_crescimento[analise_crescimento['Empresa'] == empresa_sel].iloc[0]
-            investido = linha['Valor Investido']
-            fair_val = linha['Fair Value']
-            necessario = linha['IPCA+6%: Valor']
-            uplift = linha['Crescimento Necessário (%)']
-            x_positions = [0, 1, 2]
-            bar_colors = ['#2196F3', '#FF9800', '#4CAF50']
-            tick_text = [
-                f"Investido: R$ {format_brazil(investido)}k",
-                f"Fair Value: R$ {format_brazil(fair_val)}k",
-                f"IPCA+6%: R$ {format_brazil(necessario)}k"
-            ]
-            
-            if uplift >= 0:
-                title_text = f"Uplift de +{uplift:.2f}% em relação ao benchmark"
-                arrow_dict = dict(x=x_positions[2], y=necessario,
-                                  ax=x_positions[1], ay=fair_val,
-                                  xref="x", yref="y",
-                                  axref="x", ayref="y",
-                                  arrowhead=3, arrowcolor="white",
-                                  arrowwidth=3,
-                                  showarrow=True)
-                annotation_text = f"Uplift de +{uplift:.2f}%"
+            active_companies = active_investments["Empresa"].tolist()
+            if not active_companies:
+                st.error("Nenhuma empresa ativa disponível para análise gráfica.")
             else:
-                overperf = (fair_val / necessario) * 100 if necessario != 0 else np.nan
-                title_text = f"Overperformance de {overperf:.2f}% em relação ao benchmark"
-                arrow_dict = dict(x=x_positions[1], y=fair_val,
-                                  ax=x_positions[2], ay=necessario,
-                                  xref="x", yref="y",
-                                  axref="x", ayref="y",
-                                  arrowhead=3, arrowcolor="white",
-                                  arrowwidth=3,
-                                  showarrow=True)
-                annotation_text = f"Overperformance de {overperf:.2f}%"
-            
-            fig_uplift = go.Figure([
-                go.Bar(x=x_positions, y=[investido, fair_val, necessario], marker_color=bar_colors)
-            ])
-            fig_uplift.update_layout(
-                title=title_text,
-                yaxis_title='Valores (R$ mil)',
-                xaxis=dict(
-                    tickmode='array',
-                    tickvals=x_positions,
-                    ticktext=tick_text
-                ),
-                template='plotly_dark'
-            )
-            fig_uplift.add_annotation(**arrow_dict)
-            mid_x = (x_positions[1] + x_positions[2]) / 2
-            mid_y = (fair_val + necessario) / 2
-            fig_uplift.add_annotation(
-                x=mid_x,
-                y=mid_y,
-                text=annotation_text,
-                showarrow=False,
-                font=dict(color="white", size=14),
-                bgcolor="rgba(0,0,0,0.8)",
-            )
-            st.plotly_chart(fig_uplift, use_container_width=True)
-    
+                empresa_sel = st.selectbox("Selecione uma empresa", active_companies, key="graph_select")
+                filtered = analise_crescimento[analise_crescimento['Empresa'] == empresa_sel]
+                if filtered.empty:
+                    st.error("Nenhuma empresa encontrada para análise gráfica.")
+                else:
+                    linha = filtered.iloc[0]
+                    investido = linha['Valor Investido']
+                    fair_val = linha['Fair Value']
+                    necessario = linha['IPCA+6%: Valor']
+                    participacao = linha['Participação do Fundo (%)']
+                    multiplo = linha['Múltiplo']
+                    
+                    fair_val_adjusted = fair_val * (participacao / 100)
+                    sale = investido * multiplo
+                    x_positions = [0, 1, 2, 3]
+                    bar_colors = ['#2196F3', '#FF9800', '#4CAF50', '#9C27B0']
+                    tick_text = [
+                        f"Investido: R$ {format_brazil(investido)}k",
+                        f"Fair Value (ajustado): R$ {format_brazil(fair_val_adjusted)}k",
+                        f"IPCA+6%: R$ {format_brazil(necessario)}k",
+                        f"Sale: R$ {format_brazil(sale)}k"
+                    ]
+                    uplift_adjusted = ((necessario - fair_val_adjusted) / fair_val_adjusted * 100) if fair_val_adjusted and fair_val_adjusted != 0 else np.nan
+                    title_text = f"Uplift de +{uplift_adjusted:.2f}% em relação ao benchmark" if uplift_adjusted >= 0 else f"Overperformance de {(fair_val_adjusted / necessario)*100:.2f}% em relação ao benchmark"
+                    
+                    fig_uplift = go.Figure([
+                        go.Bar(x=x_positions, y=[investido, fair_val_adjusted, necessario, sale], marker_color=bar_colors)
+                    ])
+                    fig_uplift.update_layout(
+                        title=title_text,
+                        yaxis_title='Valores (R$ mil)',
+                        xaxis=dict(
+                            tickmode='array',
+                            tickvals=x_positions,
+                            ticktext=tick_text
+                        ),
+                        template='plotly_dark'
+                    )
+                    st.plotly_chart(fig_uplift, use_container_width=True)
+        
+        # -----------------------------------------------------------
+        # AGORA: "Análise Hurdle no Tempo" JÁ AQUI EM COL1
+        # -----------------------------------------------------------
+        st.subheader("Análise Hurdle no Tempo")
+        valor_total_investido = investimentos['Valor Investido até a presente data (R$ mil)'].sum()
+        empresas_ativas_graficos = st.session_state.edited_df['Empresa'].tolist()
+        investimentos_ativos = investimentos[investimentos['Empresa'].isin(empresas_ativas_graficos)].copy()
+        valor_total_ativo = investimentos_ativos['Valor Investido até a presente data (R$ mil)'].sum()
+        valor_hurdle = valor_total_ativo * (1 + (hurdle / 100))
+        total_investido = valor_total_investido / 1000  # em milhões
+        total_corrigido_ipca_6 = investimentos_ativos.apply(
+            lambda row: corrigir_ipca(
+                row['Valor Investido até a presente data (R$ mil)'],
+                row['Data do Primeiro Investimento'],
+                adicional=9.0
+            ),
+            axis=1
+        ).sum() / 1000
+        variacao_percentual = ((total_corrigido_ipca_6 - total_investido) / total_investido) * 100
+        total_ipca = investimentos_ativos.apply(
+            lambda row: corrigir_ipca(
+                row['Valor Investido até a presente data (R$ mil)'],
+                row['Data do Primeiro Investimento']
+            ),
+            axis=1
+        ).sum() / 1000
+        total_ipca_6 = investimentos_ativos.apply(
+            lambda row: corrigir_ipca(
+                row['Valor Investido até a presente data (R$ mil)'],
+                row['Data do Primeiro Investimento'],
+                adicional=6.0
+            ),
+            axis=1
+        ).sum() / 1000
+        total_ipca_hurdle = investimentos_ativos.apply(
+            lambda row: corrigir_ipca(
+                row['Valor Investido até a presente data (R$ mil)'],
+                row['Data do Primeiro Investimento'],
+                adicional=hurdle
+            ),
+            axis=1
+        ).sum() / 1000
+        
     # -----------------------------------------------------------
-    # Resumo da Carteira e Gráficos (Coluna 2)
+    # COLUNA 2: Resumo da Carteira e Gráficos (mesma lógica)
     # -----------------------------------------------------------
-    valor_total_investido = investimentos['Valor Investido até a presente data (R$ mil)'].sum()
-    empresas_ativas_graficos = edited_df.loc[edited_df['Write-off'] == False, 'Empresa'].tolist()
-    investimentos_ativos = investimentos[investimentos['Empresa'].isin(empresas_ativas_graficos)].copy()
-    
-    valor_total_ativo = investimentos_ativos['Valor Investido até a presente data (R$ mil)'].sum()
-    valor_hurdle = valor_total_ativo * (1 + (hurdle / 100))
-    
-    total_investido = valor_total_investido / 1000  # em milhões
-    total_corrigido_ipca_6 = investimentos_ativos.apply(
-        lambda row: corrigir_ipca(
-            row['Valor Investido até a presente data (R$ mil)'],
-            row['Data do Primeiro Investimento'],
-            adicional=6.0
-        ),
-        axis=1
-    ).sum() / 1000
-    
-    variacao_percentual = ((total_corrigido_ipca_6 - total_investido) / total_investido) * 100
-
-    # Cálculos adicionais para os gráficos comparativos
-    total_ipca = investimentos_ativos.apply(
-        lambda row: corrigir_ipca(
-            row['Valor Investido até a presente data (R$ mil)'],
-            row['Data do Primeiro Investimento']
-        ),
-        axis=1
-    ).sum() / 1000
-    
-    total_ipca_6 = investimentos_ativos.apply(
-        lambda row: corrigir_ipca(
-            row['Valor Investido até a presente data (R$ mil)'],
-            row['Data do Primeiro Investimento'],
-            adicional=6.0
-        ),
-        axis=1
-    ).sum() / 1000
-    
-    total_ipca_hurdle = investimentos_ativos.apply(
-        lambda row: corrigir_ipca(
-            row['Valor Investido até a presente data (R$ mil)'],
-            row['Data do Primeiro Investimento'],
-            adicional=hurdle
-        ),
-        axis=1
-    ).sum() / 1000
-    
     with col2:
         st.subheader("📊 Gráficos de Investimentos")
+        with st.expander("Participação do Fundo por Empresa"):
+            df_ativos = st.session_state.edited_df[st.session_state.edited_df['Múltiplo'] > 0]
+            fig_port = go.Figure(data=[go.Bar(
+                x=df_ativos['Empresa'],
+                y=df_ativos['Participação do Fundo (%)'],
+                marker_color='#4CAF50'
+            )])
+            fig_port.update_layout(
+                xaxis_title="Empresa",
+                yaxis_title="Participação do Fundo (%)",
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig_port, use_container_width=True)
         
-        # Primeiro gráfico: Participação do Fundo por Empresa
-        st.markdown("**Participação do Fundo por Empresa**")
-        df_ativos = edited_df[edited_df['Write-off'] == False]
-        fig_port = go.Figure(data=[go.Bar(
-            x=df_ativos['Empresa'],
-            y=df_ativos['Participação do Fundo (%)'],
-            marker_color='#4CAF50'
-        )])
-        fig_port.update_layout(
-            xaxis_title="Empresa",
-            yaxis_title="Participação do Fundo (%)",
-            template="plotly_dark"
-        )
-        st.plotly_chart(fig_port, use_container_width=True)
-        
-        # Função auxiliar para gráficos comparativos
         def plot_comparativo(valores_corrigidos, cor_corrigido, label_corrigido):
             empresas = investimentos_ativos['Empresa']
             valores_investidos = investimentos_ativos['Valor Investido até a presente data (R$ mil)']
-            
             fig = go.Figure(data=[
                 go.Bar(
                     x=empresas,
@@ -357,7 +359,6 @@ if fair_value is not None and investimentos is not None:
             empresas = investimentos_ativos['Empresa']
             valores_aprovados = investimentos_ativos['Valor Aprovado em CI (R$ mil)']
             valores_investidos = investimentos_ativos['Valor Investido até a presente data (R$ mil)']
-            
             fig = go.Figure(data=[
                 go.Bar(
                     x=empresas,
@@ -402,7 +403,7 @@ if fair_value is not None and investimentos is not None:
                     adicional=6.0
                 ),
                 axis=1
-            )
+            ).round(2)
             plot_comparativo(
                 investimentos_ativos['Valor Corrigido IPCA+6%'],
                 '#9C27B0',
@@ -417,23 +418,20 @@ if fair_value is not None and investimentos is not None:
                     adicional=hurdle
                 ),
                 axis=1
-            )
+            ).round(2)
             plot_comparativo(
                 investimentos_ativos['Valor Corrigido IPCA+Hurdle'],
                 '#3F51B5',
                 'Valor Corrigido'
             )
     
-    # -----------------------------------------------------------
-    # Resultados da Carteira
-    # -----------------------------------------------------------
     st.subheader("📈 Resultados da Carteira")
-    empresas_ativas_graficos = edited_df.loc[edited_df['Write-off'] == False, 'Empresa'].tolist()
+    empresas_ativas_graficos = st.session_state.edited_df['Empresa'].tolist()
     if empresas_ativas_graficos:
         investimentos_ativos = investimentos[investimentos['Empresa'].isin(empresas_ativas_graficos)].copy()
         valor_total_ativo = investimentos_ativos['Valor Investido até a presente data (R$ mil)'].sum()
         valor_hurdle = valor_total_ativo * (1 + (hurdle / 100))
         crescimento_necessario = ((valor_hurdle - valor_total_ativo) / valor_total_ativo) * 100
-        st.success(f"As empresas ativas precisam crescer {crescimento_necessario:.2f}% para atingir o valor da Hurdle.")
+        st.success(f"As empresas precisam crescer {crescimento_necessario:.2f}% para atingir o valor da Hurdle.")
     else:
-        st.error("❗ Nenhuma empresa ativa (Write-off marcado para todas).")
+        st.error("❗ Nenhuma empresa ativa (Múltiplo definido como 0).")
