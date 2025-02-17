@@ -16,7 +16,7 @@ echo.
 
 :: Adiciona os arquivos, cria o commit e faz o force push
 git add .
-git commit -m "Nova versão: %versionNumber%"
+git commit -m "New version: %versionNumber%"
 git push --force origin main
 
 echo.
