@@ -11,7 +11,7 @@ if not exist ".git" (
     echo Sincronizando com o repositório remoto...
     git fetch --all
     git reset --hard origin/main
-    git clean -fd --exclude=send.bat
+    git clean -fd --exclude=send.bat --exclude=*.exe
 )
 
 exit
