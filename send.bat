@@ -17,6 +17,7 @@ echo.
 :: Executa os comandos do Git
 git add .
 git commit -m "Nova versão: %versionNumber%"
+git pull --rebase origin main
 git push origin main
 
 echo.
