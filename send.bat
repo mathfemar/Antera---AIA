@@ -1,25 +1,24 @@
 @echo off
-echo ================================
-echo   Criando nova versão no GitHub
-echo ================================
+echo =================================
+echo   Enviando alterações para o GitHub (Force Push)
+echo =================================
 echo.
 
 :: Garante que o diretório atual seja o mesmo do .bat
 cd /d %~dp0
 
-:: Solicita a versão ao usuário
+:: Solicita o número da nova versão
 set /p versionNumber=Digite o número da nova versão (ex.: 1.0.3): 
 
 echo.
 echo Versão digitada: %versionNumber%
 echo.
 
-:: Executa os comandos do Git
+:: Adiciona os arquivos, cria o commit e faz o force push
 git add .
 git commit -m "Nova versão: %versionNumber%"
-git pull --rebase origin main
-git push origin main
+git push --force origin main
 
 echo.
-echo Pressione qualquer tecla para sair...
-pause > nul
+echo Alterações enviadas com sucesso.
+pause
