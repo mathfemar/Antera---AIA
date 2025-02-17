@@ -82,7 +82,7 @@ def obter_ipca():
             st.error("Erro ao acessar API do BCB. Status code: " + str(response.status_code))
             return None
     except Exception as e:
-        st.error(f"Erro ao obter dados do IPCA: {e}. Usando valor fixo de IPCA.")
+        st.error(f"Erro ao obter IPCA: {e}. Usando valor fixo de IPCA.")
         return None
 
 def calcular_ipca_acumulado(data_inicial):
@@ -119,7 +119,7 @@ fair_value, investimentos = carregar_dados()
 
 if fair_value is not None and investimentos is not None:
     # Cria o DataFrame a partir da planilha (usando a coluna "Múltiplo")
-    df_empresas = investimentos[[
+    df_empresas = investimentos[[ 
         'Múltiplo',
         'Empresa',
         'Valor Investido até a presente data (R$ mil)',
@@ -156,6 +156,7 @@ if fair_value is not None and investimentos is not None:
                 key="table_edit"
             )
             st.session_state.edited_df = edited_df
+        
         with col_placeholder:
             st.markdown("## Configurar Múltiplo")
             company_selected = st.selectbox(
@@ -188,7 +189,6 @@ if fair_value is not None and investimentos is not None:
         st.markdown("---")
         st.subheader("📈 Crescimento Necessário por Empresa (IPCA+6%)")
         col_table2, col_graph = st.columns([1, 1])
-        
         # Filtra investimentos com Múltiplo > 0
         active_investments = st.session_state.edited_df[st.session_state.edited_df['Múltiplo'] > 0].copy()
         analise_crescimento = pd.DataFrame()
@@ -250,8 +250,19 @@ if fair_value is not None and investimentos is not None:
                         f"IPCA+6%: R$ {format_brazil(necessario)}k",
                         f"Sale: R$ {format_brazil(sale)}k"
                     ]
-                    uplift_adjusted = ((necessario - fair_val_adjusted) / fair_val_adjusted * 100) if fair_val_adjusted and fair_val_adjusted != 0 else np.nan
-                    title_text = f"Uplift de +{uplift_adjusted:.2f}% em relação ao benchmark" if uplift_adjusted >= 0 else f"Overperformance de {(fair_val_adjusted / necessario)*100:.2f}% em relação ao benchmark"
+                    
+                    if fair_val_adjusted != 0:
+                        uplift_adjusted = ((necessario - fair_val_adjusted) / fair_val_adjusted) * 100
+                    else:
+                        uplift_adjusted = np.nan
+                    
+                    if pd.notna(uplift_adjusted) and uplift_adjusted >= 0:
+                        title_text = f"Uplift de +{uplift_adjusted:.2f}% em relação ao benchmark"
+                    elif pd.notna(uplift_adjusted):
+                        over = (fair_val_adjusted / necessario) * 100 if necessario != 0 else 0
+                        title_text = f"Overperformance de {over:.2f}% em relação ao benchmark"
+                    else:
+                        title_text = "Sem dados suficientes"
                     
                     fig_uplift = go.Figure([
                         go.Bar(x=x_positions, y=[investido, fair_val_adjusted, necessario, sale], marker_color=bar_colors)
@@ -259,28 +270,99 @@ if fair_value is not None and investimentos is not None:
                     fig_uplift.update_layout(
                         title=title_text,
                         yaxis_title='Valores (R$ mil)',
-                        xaxis=dict(
-                            tickmode='array',
-                            tickvals=x_positions,
-                            ticktext=tick_text
-                        ),
+                        xaxis=dict(tickmode='array', tickvals=x_positions, ticktext=tick_text),
                         template='plotly_dark'
                     )
                     st.plotly_chart(fig_uplift, use_container_width=True)
         
         # -----------------------------------------------------------
-        # AGORA: "Análise Hurdle no Tempo" JÁ AQUI EM COL1
+        # NOVA SEÇÃO: Análise Hurdle no Tempo (Gráfico trimestral) - SOMA CUMULATIVA
         # -----------------------------------------------------------
         st.subheader("Análise Hurdle no Tempo")
+        try:
+            caminho_parcelas = os.path.join(DIRETORIO_DADOS, 'data_investimentos.xlsx')
+            df_parcelas = pd.read_excel(caminho_parcelas)
+            df_parcelas["Data Investimento"] = pd.to_datetime(df_parcelas["Data Investimento"], format="%d/%m/%Y", errors="coerce")
+            min_date = df_parcelas["Data Investimento"].min()
+        except Exception as e:
+            st.error(f"Erro ao carregar data_investimentos.xlsx: {e}")
+            df_parcelas = pd.DataFrame(columns=["Empresa","Setor","Data Investimento","Valor Investido"])
+            min_date = datetime(1900, 1, 1)
+
+        current_month_first = pd.to_datetime(datetime.now().strftime("%Y-%m-01"))
+
+        # Se não houver dados, exibimos aviso e não plotamos.
+        if df_parcelas.empty:
+            st.warning("Não há dados em data_investimentos.xlsx para exibir o gráfico cumulativo de investimentos.")
+        else:
+            # 1) Converter "Valor Investido" para float
+            df_parcelas["Valor Investido"] = (
+                df_parcelas["Valor Investido"]
+                .astype(str)
+                .str.replace("R\\$","", regex=True)
+                .str.replace("\\.","", regex=True)
+                .str.replace(",",".", regex=True)
+            )
+            df_parcelas["Valor Investido"] = pd.to_numeric(df_parcelas["Valor Investido"], errors="coerce")
+
+            # 2) Agrupar por data (dia) e somar os aportes nesse dia
+            df_agrupado = df_parcelas.groupby("Data Investimento", as_index=False)["Valor Investido"].sum()
+            # 3) Ordenar por data e fazer soma cumulativa
+            df_agrupado.sort_values("Data Investimento", inplace=True)
+            df_agrupado["SomaCumulativa"] = df_agrupado["Valor Investido"].cumsum()
+
+            # 4) Criar um índice diário (ou trimestral?), aqui vamos usar diário para termos a soma exata.
+            daily_index = pd.date_range(start=min_date, end=current_month_first, freq='D')
+
+            # 5) Reindexar para ter um valor cumulativo em cada dia (fill forward)
+            df_agrupado.set_index("Data Investimento", inplace=True)
+            df_agrupado = df_agrupado.reindex(daily_index, method="ffill").fillna(0)
+            df_agrupado.index.name = "Data Investimento"
+
+            # 6) Agora temos soma cumulativa dia a dia. Precisamos plotar trimestral no eixo X (dtick="M3").
+            #    Faremos um Scatter com x = daily_index e y = df_agrupado["SomaCumulativa"].
+
+            fig_temp = go.Figure()
+            fig_temp.add_trace(
+                go.Scatter(
+                    x=daily_index,
+                    y=df_agrupado["SomaCumulativa"],
+                    mode='lines+markers',
+                    line=dict(color='cyan'),
+                    marker=dict(color='cyan'),
+                    name='Cumulativo'
+                )
+            )
+            fig_temp.update_layout(
+                title="Período de Investimentos (Trimestral) - Soma Cumulativa",
+                xaxis_title="Data",
+                xaxis=dict(
+                    type='date',
+                    range=[min_date, current_month_first],
+                    dtick="M3",          # 1 tick a cada 3 meses
+                    tickformat="%b\n%Y", # Mês e Ano em linhas separadas
+                    tickfont=dict(color='cyan')
+                ),
+                yaxis=dict(
+                    visible=False  # oculta os valores no eixo Y
+                ),
+                template='plotly_dark'
+            )
+            st.plotly_chart(fig_temp, use_container_width=True)
+        
+        # -----------------------------------------------------------
+        # CONTINUA A SEÇÃO "Análise Hurdle no Tempo" (cálculos existentes)
+        # -----------------------------------------------------------
+        investimentos_ativos = investimentos[investimentos['Empresa'].isin(st.session_state.edited_df['Empresa'].tolist())].copy()
+        investimentos_ativos.rename(columns={'Valor Investido até a presente data (R$ mil)': 'Valor Investido'}, inplace=True)
+        
         valor_total_investido = investimentos['Valor Investido até a presente data (R$ mil)'].sum()
-        empresas_ativas_graficos = st.session_state.edited_df['Empresa'].tolist()
-        investimentos_ativos = investimentos[investimentos['Empresa'].isin(empresas_ativas_graficos)].copy()
-        valor_total_ativo = investimentos_ativos['Valor Investido até a presente data (R$ mil)'].sum()
+        valor_total_ativo = investimentos_ativos['Valor Investido'].sum()
         valor_hurdle = valor_total_ativo * (1 + (hurdle / 100))
         total_investido = valor_total_investido / 1000  # em milhões
         total_corrigido_ipca_6 = investimentos_ativos.apply(
             lambda row: corrigir_ipca(
-                row['Valor Investido até a presente data (R$ mil)'],
+                row['Valor Investido'],
                 row['Data do Primeiro Investimento'],
                 adicional=9.0
             ),
@@ -289,14 +371,14 @@ if fair_value is not None and investimentos is not None:
         variacao_percentual = ((total_corrigido_ipca_6 - total_investido) / total_investido) * 100
         total_ipca = investimentos_ativos.apply(
             lambda row: corrigir_ipca(
-                row['Valor Investido até a presente data (R$ mil)'],
+                row['Valor Investido'],
                 row['Data do Primeiro Investimento']
             ),
             axis=1
         ).sum() / 1000
         total_ipca_6 = investimentos_ativos.apply(
             lambda row: corrigir_ipca(
-                row['Valor Investido até a presente data (R$ mil)'],
+                row['Valor Investido'],
                 row['Data do Primeiro Investimento'],
                 adicional=6.0
             ),
@@ -304,13 +386,13 @@ if fair_value is not None and investimentos is not None:
         ).sum() / 1000
         total_ipca_hurdle = investimentos_ativos.apply(
             lambda row: corrigir_ipca(
-                row['Valor Investido até a presente data (R$ mil)'],
+                row['Valor Investido'],
                 row['Data do Primeiro Investimento'],
                 adicional=hurdle
             ),
             axis=1
         ).sum() / 1000
-        
+
     # -----------------------------------------------------------
     # COLUNA 2: Resumo da Carteira e Gráficos (mesma lógica)
     # -----------------------------------------------------------
@@ -326,13 +408,13 @@ if fair_value is not None and investimentos is not None:
             fig_port.update_layout(
                 xaxis_title="Empresa",
                 yaxis_title="Participação do Fundo (%)",
-                template="plotly_dark"
+                template='plotly_dark'
             )
             st.plotly_chart(fig_port, use_container_width=True)
         
-        def plot_comparativo(valores_corrigidos, cor_corrigido, label_corrigido):
+        def plot_comparativo(valores_corrigidos, cor_corrigida, label_corrigido):
             empresas = investimentos_ativos['Empresa']
-            valores_investidos = investimentos_ativos['Valor Investido até a presente data (R$ mil)']
+            valores_investidos = investimentos_ativos['Valor Investido']
             fig = go.Figure(data=[
                 go.Bar(
                     x=empresas,
@@ -344,7 +426,7 @@ if fair_value is not None and investimentos is not None:
                     x=empresas,
                     y=valores_corrigidos,
                     name=label_corrigido,
-                    marker_color=cor_corrigido
+                    marker_color=cor_corrigida
                 )
             ])
             fig.update_layout(
@@ -355,23 +437,13 @@ if fair_value is not None and investimentos is not None:
             )
             st.plotly_chart(fig, use_container_width=True)
         
-        with st.expander(f"Comparativo: Valor Aprovado vs Valor Investido (Total Investido: R$ {total_investido:.2f} MM)"):
+        with st.expander(f"Comparativo: Valor Aprovado vs Valor Investido (Total Investido: R$ {(investimentos_ativos['Valor Investido'].sum()/1000):.2f} MM)"):
             empresas = investimentos_ativos['Empresa']
             valores_aprovados = investimentos_ativos['Valor Aprovado em CI (R$ mil)']
-            valores_investidos = investimentos_ativos['Valor Investido até a presente data (R$ mil)']
+            valores_investidos = investimentos_ativos['Valor Investido']
             fig = go.Figure(data=[
-                go.Bar(
-                    x=empresas,
-                    y=valores_aprovados,
-                    name='Valor Aprovado',
-                    marker_color='#4CAF50'
-                ),
-                go.Bar(
-                    x=empresas,
-                    y=valores_investidos,
-                    name='Valor Investido',
-                    marker_color='#2196F3'
-                )
+                go.Bar(x=empresas, y=valores_aprovados, name='Valor Aprovado', marker_color='#4CAF50'),
+                go.Bar(x=empresas, y=valores_investidos, name='Valor Investido', marker_color='#2196F3')
             ])
             fig.update_layout(
                 yaxis_title='Valores (R$ mil)',
@@ -384,7 +456,7 @@ if fair_value is not None and investimentos is not None:
         with st.expander(f"Montante Total Investido Corrigido pelo IPCA (R$ {total_ipca:.2f} MM)"):
             investimentos_ativos['Valor Corrigido IPCA'] = investimentos_ativos.apply(
                 lambda row: corrigir_ipca(
-                    row['Valor Investido até a presente data (R$ mil)'],
+                    row['Valor Investido'],
                     row['Data do Primeiro Investimento']
                 ),
                 axis=1
@@ -398,7 +470,7 @@ if fair_value is not None and investimentos is not None:
         with st.expander(f"Montante Total Investido Corrigido pelo IPCA+6% (R$ {total_ipca_6:.2f} MM)"):
             investimentos_ativos['Valor Corrigido IPCA+6%'] = investimentos_ativos.apply(
                 lambda row: corrigir_ipca(
-                    row['Valor Investido até a presente data (R$ mil)'],
+                    row['Valor Investido'],
                     row['Data do Primeiro Investimento'],
                     adicional=6.0
                 ),
@@ -413,7 +485,7 @@ if fair_value is not None and investimentos is not None:
         with st.expander(f"Montante Total Investido Corrigido pelo IPCA+{hurdle}% (R$ {total_ipca_hurdle:.2f} MM)"):
             investimentos_ativos['Valor Corrigido IPCA+Hurdle'] = investimentos_ativos.apply(
                 lambda row: corrigir_ipca(
-                    row['Valor Investido até a presente data (R$ mil)'],
+                    row['Valor Investido'],
                     row['Data do Primeiro Investimento'],
                     adicional=hurdle
                 ),
@@ -429,7 +501,8 @@ if fair_value is not None and investimentos is not None:
     empresas_ativas_graficos = st.session_state.edited_df['Empresa'].tolist()
     if empresas_ativas_graficos:
         investimentos_ativos = investimentos[investimentos['Empresa'].isin(empresas_ativas_graficos)].copy()
-        valor_total_ativo = investimentos_ativos['Valor Investido até a presente data (R$ mil)'].sum()
+        investimentos_ativos.rename(columns={'Valor Investido até a presente data (R$ mil)': 'Valor Investido'}, inplace=True)
+        valor_total_ativo = investimentos_ativos['Valor Investido'].sum()
         valor_hurdle = valor_total_ativo * (1 + (hurdle / 100))
         crescimento_necessario = ((valor_hurdle - valor_total_ativo) / valor_total_ativo) * 100
         st.success(f"As empresas precisam crescer {crescimento_necessario:.2f}% para atingir o valor da Hurdle.")

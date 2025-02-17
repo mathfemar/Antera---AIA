@@ -15,6 +15,17 @@ IF %ERRORLEVEL% NEQ 0 (
     echo ✅ Python está instalado.
 )
 
+:: Verificar se o Git está instalado
+git --version >nul 2>&1
+IF %ERRORLEVEL% NEQ 0 (
+    echo ⚠️ Git não encontrado. Baixando o instalador do Git for Windows...
+    curl -o git-installer.exe https://github.com/git-for-windows/git/releases/download/v2.41.0.windows.1/Git-2.41.0-64-bit.exe
+    start /wait git-installer.exe /VERYSILENT
+    del git-installer.exe
+) ELSE (
+    echo ✅ Git está instalado.
+)
+
 :: Garantir que o PIP está instalado
 python -m ensurepip --default-pip >nul 2>&1
 IF %ERRORLEVEL% NEQ 0 (

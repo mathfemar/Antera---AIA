@@ -55,14 +55,14 @@ def obter_ipca():
             try:
                 json_data = response.json()
             except ValueError as ve:
-                st.error(f"Erro ao decodificar JSON do BCB: {ve}. Usando valor fixo de IPCA.")
+                st.error(f"Erro ao decodificar JSON da API do BCB: {ve}. Usando valor fixo de IPCA.")
                 return None
             if not json_data:
                 st.error("A API do BCB não retornou dados. Usando valor fixo de IPCA.")
                 return None
             dados = pd.DataFrame(json_data)
             if 'data' not in dados.columns or 'valor' not in dados.columns:
-                st.error("Resposta da API não contém 'data'/'valor'. Usando valor fixo de IPCA.")
+                st.error("Resposta da API não contém os dados esperados. Usando valor fixo de IPCA.")
                 return None
             dados['data'] = pd.to_datetime(dados['data'], format='%d/%m/%Y')
             dados['valor'] = pd.to_numeric(dados['valor'], errors='coerce')
@@ -71,10 +71,10 @@ def obter_ipca():
             dados['variacao_decimal'] = dados['valor'] / 100
             return dados
         else:
-            st.error(f"Erro ao acessar API do BCB. Status code: {response.status_code}")
+            st.error("Erro ao acessar API do BCB. Status code: " + str(response.status_code))
             return None
     except Exception as e:
-        st.error(f"Erro ao obter IPCA: {e}. Usando valor fixo de IPCA.")
+        st.error(f"Erro ao obter dados do IPCA: {e}. Usando valor fixo de IPCA.")
         return None
 
 def calcular_ipca_acumulado(data_inicial):
@@ -100,5 +100,5 @@ def corrigir_ipca(valor, data_investimento, adicional=0.0):
     ipca_acum = calcular_ipca_acumulado(data_investimento)
     anos = (pd.Timestamp.now() - data_investimento).days / 365.25
     valor_corrigido_ipca = valor * (1 + ipca_acum)
-    valor_final = valor_corrigido_ipca * ((1 + adicional / 100) ** anos)
+    valor_final = valor_corrigido_ipca * (1 + adicional/100) ** anos
     return valor_final
