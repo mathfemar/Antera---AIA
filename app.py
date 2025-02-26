@@ -8,27 +8,26 @@ import time
 import plotly.graph_objects as go
 import plotly.express as px
 
-# Função auxiliar para formatar números no padrão brasileiro (ex.: 1.800,00)
+# Função para formatar número no padrão BR
 def format_brazil(value):
     formatted = f"{value:,.2f}"
     return formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
 
-# Função callback que atualiza o "Múltiplo" na tabela global a partir do number_input
 def update_multiplo():
     comp = st.session_state["select_company"]
     new_val = st.session_state[f"num_{comp}"]
-    st.session_state.edited_df.loc[st.session_state.edited_df["Empresa"] == comp, "Múltiplo"] = new_val
+    st.session_state.edited_df.loc[
+        st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
+    ] = new_val
 
-# Função callback que atualiza o "Múltiplo" na tabela global a partir do slider, com atraso de 1 segundo
 def update_multiplo_slider():
     time.sleep(1)
     comp = st.session_state["select_company"]
     new_val = st.session_state[f"slider_{comp}"]
-    st.session_state.edited_df.loc[st.session_state.edited_df["Empresa"] == comp, "Múltiplo"] = new_val
+    st.session_state.edited_df.loc[
+        st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
+    ] = new_val
 
-# ---------------------------------------------------------------
-# Configurações e Funções Auxiliares
-# ---------------------------------------------------------------
 DIRETORIO_ATUAL = os.path.dirname(os.path.abspath(__file__))
 DIRETORIO_DADOS = os.path.join(DIRETORIO_ATUAL, 'data')
 
@@ -37,9 +36,7 @@ def carregar_dados():
     try:
         caminho_fair_value = os.path.join(DIRETORIO_DADOS, 'fair_value.xlsx')
         caminho_investimentos = os.path.join(DIRETORIO_DADOS, 'investimentos.xlsx')
-        # Ler fair_value.xlsx
         fair_value = pd.read_excel(caminho_fair_value)
-        # Ler investimentos.xlsx; se a coluna "Múltiplo" não existir, cria com valor padrão 1.0
         investimentos = pd.read_excel(caminho_investimentos)
         if 'Múltiplo' not in investimentos.columns:
             investimentos['Múltiplo'] = 1.0
@@ -63,7 +60,7 @@ def obter_ipca():
             try:
                 json_data = response.json()
             except ValueError as ve:
-                st.error(f"Erro ao decodificar JSON da API do BCB: {ve}. Usando valor fixo de IPCA.")
+                st.error(f"Erro ao decodificar JSON do BCB: {ve}. Usando valor fixo de IPCA.")
                 return None
             if not json_data:
                 st.error("A API do BCB não retornou dados. Usando valor fixo de IPCA.")
@@ -88,7 +85,7 @@ def obter_ipca():
 def calcular_ipca_acumulado(data_inicial):
     df_ipca = obter_ipca()
     if df_ipca is None:
-        return 0.045  # Valor fixo se a API falhar
+        return 0.045
     data_inicial = pd.to_datetime(data_inicial)
     mask = (df_ipca.index >= data_inicial)
     ipca_periodo = df_ipca[mask]
@@ -100,33 +97,27 @@ def corrigir_ipca(valor, data_investimento, adicional=0.0):
     ipca_acum = calcular_ipca_acumulado(data_investimento)
     anos = (pd.Timestamp.now() - data_investimento).days / 365.25
     valor_corrigido_ipca = valor * (1 + ipca_acum)
-    valor_final = valor_corrigido_ipca * (1 + adicional/100) ** anos
+    valor_final = valor_corrigido_ipca * ((1 + adicional/100) ** anos)
     return valor_final
 
 # ---------------------------------------------------------------
-# Configurações da Página
+# CONFIGURAÇÕES E INÍCIO DO CÓDIGO
 # ---------------------------------------------------------------
 st.set_page_config(page_title="Primatech Investment Analyzer", layout="wide")
 
-# ======= ADIÇÃO APENAS DO HURDLE NOMINAL (VALOR) =======
 col_title, col_hurdle_val = st.columns([3, 1])
 with col_title:
     st.title("📊 Primatech Investment Analyzer")
 with col_hurdle_val:
     hurdle_nominal = st.number_input("Hurdle (R$):", value=116000.0, step=1000.0, format="%.0f")
     st.write(f"Hurdle: R$ {format_brazil(hurdle_nominal)}")
-# =======================================================
 
-# Slider para Hurdle e IPCA + X%
 hurdle = st.slider("Taxa de Correção (IPCA + %)", 0.0, 15.0, 9.0, 0.5)
 
-# ---------------------------------------------------------------
-# Carregamento dos Dados
-# ---------------------------------------------------------------
 fair_value, investimentos = carregar_dados()
 
 if fair_value is not None and investimentos is not None:
-    # Cria o DataFrame a partir da planilha (usando a coluna "Múltiplo")
+    # Tabela base
     df_empresas = investimentos[[ 
         'Múltiplo',
         'Empresa',
@@ -136,27 +127,50 @@ if fair_value is not None and investimentos is not None:
     ]].copy()
     df_empresas.rename(columns={'Valor Investido até a presente data (R$ mil)': 'Valor Investido'}, inplace=True)
     
-    # Se ainda não estiver em session_state, inicializa a tabela editável
+    # Adicionamos "Fair Value" total (da planilha fair_value.xlsx)
+    if "Fair Value" not in df_empresas.columns:
+        df_empresas["Fair Value"] = np.nan
+    
+    # Preenche Fair Value total do df_empresas
+    for i, row in df_empresas.iterrows():
+        emp = row["Empresa"]
+        match = fair_value.loc[
+            fair_value["Empresa"].str.upper() == emp.strip().upper()
+        ]
+        if not match.empty:
+            # Pega o valor total da empresa (Valor Primatec (R$ mil))
+            df_empresas.at[i, "Fair Value"] = match.iloc[0]["Valor Primatec (R$ mil)"]
+        else:
+            df_empresas.at[i, "Fair Value"] = np.nan
+    
     if 'edited_df' not in st.session_state:
         st.session_state.edited_df = df_empresas.copy()
+    else:
+        # Atualiza no session_state se desejar
+        st.session_state.edited_df = df_empresas.copy()
     
-    # -----------------------------------------------------------
-    # COLUNA 1: Tabela (sem scroll) + Configuração de Múltiplo
-    # -----------------------------------------------------------
+    # Layout
     col1, col2 = st.columns([2, 1])
     
     with col1:
         st.subheader("Empresas do Portfólio")
-        # Cria duas colunas lado a lado: a tabela e o configurador
-        col_table, col_placeholder = st.columns([1, 1], gap="small")
         
+        col_table, col_placeholder = st.columns([1, 1], gap="small")
         with col_table:
+            # Reordenamos as colunas (ex.: Múltiplo, Empresa, Valor Investido, Fair Value, ...)
+            # Para que "Fair Value" fique, por ex., no índice 3
+            new_cols = ["Múltiplo", "Empresa", "Valor Investido", "Fair Value", "Participação do Fundo (%)", "Data do Primeiro Investimento"]
+            # Garante que existam
+            final_cols = [c for c in new_cols if c in st.session_state.edited_df.columns]
+            st.session_state.edited_df = st.session_state.edited_df[final_cols]
+            
             edited_df = st.data_editor(
                 st.session_state.edited_df,
                 column_config={
                     "Múltiplo": st.column_config.NumberColumn("Múltiplo", format="%.2fx", min_value=0.0, max_value=100.0, width=80),
                     "Empresa": st.column_config.TextColumn("Empresa", width=120),
                     "Valor Investido": st.column_config.NumberColumn("Valor Investido", format="%.2f"),
+                    "Fair Value": st.column_config.NumberColumn("Fair Value", format="%.2f"),
                     "Participação do Fundo (%)": st.column_config.NumberColumn("Participação do Fundo (%)", format="%.2f"),
                     "Data do Primeiro Investimento": st.column_config.TextColumn("Data do Primeiro Investimento")
                 },
@@ -197,31 +211,53 @@ if fair_value is not None and investimentos is not None:
         st.markdown("---")
         st.subheader("📈 Crescimento Necessário por Empresa (IPCA+6%)")
         col_table2, col_graph = st.columns([1, 1])
-        # Filtra investimentos com Múltiplo > 0
-        active_investments = st.session_state.edited_df[st.session_state.edited_df['Múltiplo'] > 0].copy()
+        
+        # Tabela de Crescimento
+        active_investments = st.session_state.edited_df[
+            st.session_state.edited_df['Múltiplo'] > 0
+        ].copy()
         analise_crescimento = pd.DataFrame()
         valor_total_carteira = active_investments['Valor Investido'].sum()
         
         for _, row in active_investments.iterrows():
             valor_investido = row['Valor Investido']
-            valor_necessario = corrigir_ipca(valor_investido, row['Data do Primeiro Investimento'], adicional=6.0)
-            fair_val_match = fair_value.loc[fair_value['Empresa'].str.upper() == row['Empresa'].strip().upper()]
-            if not fair_val_match.empty:
-                fair_val_val = fair_val_match.iloc[0]['Valor Primatec (R$ mil)']
+            valor_necessario = corrigir_ipca(
+                valor_investido,
+                row['Data do Primeiro Investimento'],
+                adicional=6.0
+            )
+            # Aqui pegamos o "Fair Value" total (já presente na tabela de cima)
+            fair_value_total = row["Fair Value"]
+            
+            # Agora calculamos "FV Part." = Fair Value total * (Participação/100)
+            pct_fundo = row['Participação do Fundo (%)']
+            if pd.notna(fair_value_total) and pct_fundo > 0:
+                fv_part = fair_value_total * (pct_fundo / 100.0)
             else:
-                fair_val_val = np.nan
-            uplift_percent = ((valor_necessario - fair_val_val) / fair_val_val * 100) if fair_val_val and fair_val_val != 0 else np.nan
-            peso_carteira = (valor_investido / valor_total_carteira * 100) if valor_total_carteira != 0 else 0
+                fv_part = np.nan
+            
+            if pd.notna(fv_part) and fv_part != 0:
+                uplift_percent = ((valor_necessario - fv_part) / fv_part) * 100
+            else:
+                uplift_percent = np.nan
+            
+            peso_carteira = (
+                (valor_investido / valor_total_carteira * 100)
+                if valor_total_carteira != 0 else 0
+            )
+            
             multiplicador = row['Múltiplo']
             
+            # Tabela final: exibimos "Fair Value" (total) e "FV Part." 
             analise_crescimento = pd.concat([analise_crescimento, pd.DataFrame({
                 'Empresa': [row['Empresa']],
                 'Valor Investido': [valor_investido],
-                'Fair Value': [fair_val_val],
+                #'Fair Value': [fair_value_total],   # total
+                'FV Part.': [fv_part],             # valor do fundo
                 'IPCA+6%: Valor': [valor_necessario],
                 'Crescimento Necessário (%)': [uplift_percent],
                 'Peso na Carteira (%)': [peso_carteira],
-                'Participação do Fundo (%)': [row['Participação do Fundo (%)']],
+                'Participação do Fundo (%)': [pct_fundo],
                 'Múltiplo': [multiplicador]
             })])
         
@@ -243,37 +279,47 @@ if fair_value is not None and investimentos is not None:
                 else:
                     linha = filtered.iloc[0]
                     investido = linha['Valor Investido']
-                    fair_val = linha['Fair Value']
+                    #fair_val_total = linha['Fair Value']
+                    fv_part = linha['FV Part.']
                     necessario = linha['IPCA+6%: Valor']
-                    participacao = linha['Participação do Fundo (%)']
+                    pct_fundo = linha['Participação do Fundo (%)']
                     multiplo = linha['Múltiplo']
                     
-                    fair_val_adjusted = fair_val * (participacao / 100)
+                    # O valor ajustado para o gráfico "Fair Value (ajustado)" pode ser o fv_part
+                    # se preferir exibir a parte do fundo
+                    # mas se quiser exibir o total, use fair_val_total
+                    # aqui, vamos supor que no bar a gente exibe a parte do fundo
+                    bar_fv = fv_part if pd.notna(fv_part) else 0
                     sale = investido * multiplo
+                    
                     x_positions = [0, 1, 2, 3]
                     bar_colors = ['#2196F3', '#FF9800', '#4CAF50', '#9C27B0']
                     tick_text = [
                         f"Investido: R$ {format_brazil(investido)}k",
-                        f"Fair Value (ajustado): R$ {format_brazil(fair_val_adjusted)}k",
+                        f"FV Part.: R$ {format_brazil(bar_fv)}k",
                         f"IPCA+6%: R$ {format_brazil(necessario)}k",
                         f"Sale: R$ {format_brazil(sale)}k"
                     ]
                     
-                    if fair_val_adjusted != 0:
-                        uplift_adjusted = ((necessario - fair_val_adjusted) / fair_val_adjusted) * 100
+                    if bar_fv != 0:
+                        uplift_adjusted = ((necessario - bar_fv) / bar_fv) * 100
                     else:
                         uplift_adjusted = np.nan
                     
                     if pd.notna(uplift_adjusted) and uplift_adjusted >= 0:
-                        title_text = f"Uplift de +{uplift_adjusted:.2f}% em relação ao benchmark"
+                        title_text = f"Uplift de +{uplift_adjusted:.2f}%"
                     elif pd.notna(uplift_adjusted):
-                        over = (fair_val_adjusted / necessario) * 100 if necessario != 0 else 0
-                        title_text = f"Overperformance de {over:.2f}% em relação ao benchmark"
+                        over = (bar_fv / necessario) * 100 if necessario != 0 else 0
+                        title_text = f"Overperformance de {over:.2f}%"
                     else:
                         title_text = "Sem dados suficientes"
                     
                     fig_uplift = go.Figure([
-                        go.Bar(x=x_positions, y=[investido, fair_val_adjusted, necessario, sale], marker_color=bar_colors)
+                        go.Bar(
+                            x=x_positions,
+                            y=[investido, bar_fv, necessario, sale],
+                            marker_color=bar_colors
+                        )
                     ])
                     fig_uplift.update_layout(
                         title=title_text,
