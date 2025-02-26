@@ -107,7 +107,15 @@ def corrigir_ipca(valor, data_investimento, adicional=0.0):
 # Configurações da Página
 # ---------------------------------------------------------------
 st.set_page_config(page_title="Primatech Investment Analyzer", layout="wide")
-st.title("📊 Primatech Investment Analyzer")
+
+# ======= ADIÇÃO APENAS DO HURDLE NOMINAL (VALOR) =======
+col_title, col_hurdle_val = st.columns([3, 1])
+with col_title:
+    st.title("📊 Primatech Investment Analyzer")
+with col_hurdle_val:
+    hurdle_nominal = st.number_input("Hurdle (R$):", value=116000.0, step=1000.0, format="%.0f")
+    st.write(f"Hurdle: R$ {format_brazil(hurdle_nominal)}")
+# =======================================================
 
 # Slider para Hurdle e IPCA + X%
 hurdle = st.slider("Taxa de Correção (IPCA + %)", 0.0, 15.0, 9.0, 0.5)
@@ -270,7 +278,11 @@ if fair_value is not None and investimentos is not None:
                     fig_uplift.update_layout(
                         title=title_text,
                         yaxis_title='Valores (R$ mil)',
-                        xaxis=dict(tickmode='array', tickvals=x_positions, ticktext=tick_text),
+                        xaxis=dict(
+                            tickmode='array',
+                            tickvals=x_positions,
+                            ticktext=tick_text
+                        ),
                         template='plotly_dark'
                     )
                     st.plotly_chart(fig_uplift, use_container_width=True)
@@ -412,7 +424,7 @@ if fair_value is not None and investimentos is not None:
             )
             st.plotly_chart(fig_port, use_container_width=True)
         
-        def plot_comparativo(valores_corrigidos, cor_corrigida, label_corrigido):
+        def plot_comparativo(valores_corrigidos, cor_corrigido, label_corrigido):
             empresas = investimentos_ativos['Empresa']
             valores_investidos = investimentos_ativos['Valor Investido']
             fig = go.Figure(data=[
@@ -426,7 +438,7 @@ if fair_value is not None and investimentos is not None:
                     x=empresas,
                     y=valores_corrigidos,
                     name=label_corrigido,
-                    marker_color=cor_corrigida
+                    marker_color=cor_corrigido
                 )
             ])
             fig.update_layout(
@@ -437,13 +449,24 @@ if fair_value is not None and investimentos is not None:
             )
             st.plotly_chart(fig, use_container_width=True)
         
-        with st.expander(f"Comparativo: Valor Aprovado vs Valor Investido (Total Investido: R$ {(investimentos_ativos['Valor Investido'].sum()/1000):.2f} MM)"):
+        with st.expander(f"Comparativo: Valor Aprovado vs Valor Investido (Total Investido: R$ {total_investido:.2f} MM)"):
             empresas = investimentos_ativos['Empresa']
             valores_aprovados = investimentos_ativos['Valor Aprovado em CI (R$ mil)']
             valores_investidos = investimentos_ativos['Valor Investido']
+            
             fig = go.Figure(data=[
-                go.Bar(x=empresas, y=valores_aprovados, name='Valor Aprovado', marker_color='#4CAF50'),
-                go.Bar(x=empresas, y=valores_investidos, name='Valor Investido', marker_color='#2196F3')
+                go.Bar(
+                    x=empresas,
+                    y=valores_aprovados,
+                    name='Valor Aprovado',
+                    marker_color='#4CAF50'
+                ),
+                go.Bar(
+                    x=empresas,
+                    y=valores_investidos,
+                    name='Valor Investido',
+                    marker_color='#2196F3'
+                )
             ])
             fig.update_layout(
                 yaxis_title='Valores (R$ mil)',
