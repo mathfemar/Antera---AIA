@@ -110,7 +110,7 @@ col_title, col_hurdle_val = st.columns([3, 1])
 with col_title:
     st.title("📊 Primatech Investment Analyzer")
 with col_hurdle_val:
-    hurdle_nominal = st.number_input("Hurdle (R$):", value=116000.0, step=1000.0, format="%.0f")
+    hurdle_nominal = st.number_input("Hurdle (R$):", value=117000.0, step=1000.0, format="%.0f")
     st.write(f"Hurdle: R$ {format_brazil(hurdle_nominal)}")
 
 # Slider para ajuste de taxa (IPCA + X%)
