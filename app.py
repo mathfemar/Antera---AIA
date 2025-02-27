@@ -110,7 +110,7 @@ col_title, col_hurdle_val = st.columns([3, 1])
 with col_title:
     st.title("📊 Primatech Investment Analyzer")
 with col_hurdle_val:
-    hurdle_nominal = st.number_input("Hurdle (R$):", value=116000.0, step=1000.0, format="%.0f")
+    hurdle_nominal = st.number_input("Hurdle (R$):", value=117000.0, step=1000.0, format="%.0f")
     st.write(f"Hurdle: R$ {format_brazil(hurdle_nominal)}")
 
 # Slider para ajuste de taxa (IPCA + X%)
@@ -366,8 +366,8 @@ if fair_value is not None and investimentos is not None:
                     x=daily_index,
                     y=df_agrupado["SomaCumulativa"],
                     mode='lines+markers',
-                    line=dict(color='cyan'),
-                    marker=dict(color='cyan'),
+                    line=dict(color='orange'),
+                    marker=dict(color='orange'),
                     name='Cumulativo'
                 )
             )
@@ -379,7 +379,7 @@ if fair_value is not None and investimentos is not None:
                     range=[min_date, current_month_first],
                     dtick="M3",
                     tickformat="%b\n%Y",
-                    tickfont=dict(color='cyan')
+                    tickfont=dict(color='white')
                 ),
                 yaxis=dict(visible=False),
                 template='plotly_dark'
@@ -442,13 +442,14 @@ if fair_value is not None and investimentos is not None:
 
         total_sale = analise_crescimento["Sale"].sum() if "Sale" in analise_crescimento.columns else 0.0
         
-        # Invertendo a ordem: primeiro "Realizado" (roxo), depois "Hurdle" (verde)
+        # Invertendo a ordem e dando espaço (bargap) entre as barras
         fig_hurdle = go.Figure(data=[
-            go.Bar(name='Realizado', x=['Hurdle vs Realizado'], y=[total_sale], marker_color='purple'),
-            go.Bar(name='Hurdle', x=['Hurdle vs Realizado'], y=[hurdle_nominal], marker_color='green')
+            go.Bar(name='Realizado', x=['Hurdle vs Realizado'], y=[total_sale], marker_color='light blue'),
+            go.Bar(name='Hurdle', x=['Hurdle vs Realizado'], y=[hurdle_nominal], marker_color='light green')
         ])
         fig_hurdle.update_layout(
             barmode='group',
+            bargap= 0.4,  # <-- Ajuste do espaçamento entre as barras
             template='plotly_dark',
             title="Hurdle vs Realizado"
         )
