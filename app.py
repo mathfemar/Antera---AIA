@@ -7,6 +7,7 @@ import requests
 import time
 import plotly.graph_objects as go
 import plotly.express as px
+import json
 
 # Função para formatar número no padrão BR
 def format_brazil(value):
@@ -30,6 +31,106 @@ def update_multiplo_slider():
 
 DIRETORIO_ATUAL = os.path.dirname(os.path.abspath(__file__))
 DIRETORIO_DADOS = os.path.join(DIRETORIO_ATUAL, 'data')
+ARQUIVO_CENARIOS = os.path.join(DIRETORIO_DADOS, 'cenarios.json')
+
+# Função para carregar cenários salvos
+def carregar_cenarios():
+    try:
+        if os.path.exists(ARQUIVO_CENARIOS):
+            with open(ARQUIVO_CENARIOS, 'r') as f:
+                return json.load(f)
+        else:
+            return {}  # Retorna dicionário vazio se o arquivo não existir
+    except Exception as e:
+        st.error(f"Erro ao carregar cenários: {e}")
+        return {}
+
+# Função para salvar cenários
+def salvar_cenarios(cenarios):
+    try:
+        # Certifique-se que o diretório existe
+        if not os.path.exists(DIRETORIO_DADOS):
+            os.makedirs(DIRETORIO_DADOS)
+            
+        with open(ARQUIVO_CENARIOS, 'w') as f:
+            json.dump(cenarios, f, indent=4)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar cenários: {e}")
+        return False
+
+# Função para salvar cenário atual
+def salvar_cenario_atual():
+    nome_cenario = st.session_state.novo_cenario
+    if not nome_cenario or nome_cenario.strip() == "":
+        st.warning("Por favor, insira um nome para o cenário.")
+        return
+    
+    # Obtém os múltiplos atuais
+    multiplos = {}
+    for _, row in st.session_state.edited_df.iterrows():
+        empresa = row["Empresa"]
+        multiplo = row["Múltiplo"]
+        multiplos[empresa] = multiplo
+    
+    # Carrega cenários existentes e adiciona/atualiza o novo
+    cenarios = carregar_cenarios()
+    cenarios[nome_cenario] = multiplos
+    
+    # Limita a 5 cenários
+    if len(cenarios) > 5:
+        # Remove o mais antigo
+        oldest_key = list(cenarios.keys())[0]
+        cenarios.pop(oldest_key)
+    
+    # Salva o arquivo atualizado
+    if salvar_cenarios(cenarios):
+        st.success(f"Cenário '{nome_cenario}' salvo com sucesso!")
+        # Atualiza a lista de seleção
+        st.session_state.cenarios_disponiveis = list(carregar_cenarios().keys())
+        # Limpa o campo de texto
+        st.session_state.novo_cenario = ""
+    else:
+        st.error("Erro ao salvar o cenário.")
+
+# Função para aplicar um cenário selecionado
+def aplicar_cenario():
+    nome_cenario = st.session_state.cenario_selecionado
+    cenarios = carregar_cenarios()
+    
+    if nome_cenario in cenarios:
+        multiplos = cenarios[nome_cenario]
+        
+        # Aplica os múltiplos ao dataframe
+        for empresa, multiplo in multiplos.items():
+            if empresa in st.session_state.edited_df["Empresa"].values:
+                st.session_state.edited_df.loc[
+                    st.session_state.edited_df["Empresa"] == empresa, "Múltiplo"
+                ] = multiplo
+        st.success(f"Cenário '{nome_cenario}' aplicado com sucesso!")
+    else:
+        st.error(f"Cenário '{nome_cenario}' não encontrado.")
+
+# Função para excluir um cenário
+def excluir_cenario():
+    nome_cenario = st.session_state.cenario_selecionado
+    cenarios = carregar_cenarios()
+    
+    if nome_cenario in cenarios:
+        cenarios.pop(nome_cenario)
+        if salvar_cenarios(cenarios):
+            st.success(f"Cenário '{nome_cenario}' excluído com sucesso!")
+            # Atualiza a lista de seleção
+            st.session_state.cenarios_disponiveis = list(carregar_cenarios().keys())
+            # Limpa a seleção
+            if st.session_state.cenarios_disponiveis:
+                st.session_state.cenario_selecionado = st.session_state.cenarios_disponiveis[0]
+            else:
+                st.session_state.cenario_selecionado = ""
+        else:
+            st.error("Erro ao excluir o cenário.")
+    else:
+        st.error(f"Cenário '{nome_cenario}' não encontrado.")
 
 @st.cache_data
 def carregar_dados():
@@ -106,6 +207,14 @@ def corrigir_ipca(valor, data_investimento, adicional=0.0):
 # ---------------------------------------------------------------
 st.set_page_config(page_title="Primatech Investment Analyzer", layout="wide")
 
+# Inicializa variáveis da sessão para cenários
+if 'cenarios_disponiveis' not in st.session_state:
+    st.session_state.cenarios_disponiveis = list(carregar_cenarios().keys())
+if 'cenario_selecionado' not in st.session_state and st.session_state.cenarios_disponiveis:
+    st.session_state.cenario_selecionado = st.session_state.cenarios_disponiveis[0] if st.session_state.cenarios_disponiveis else ""
+if 'novo_cenario' not in st.session_state:
+    st.session_state.novo_cenario = ""
+
 col_title, col_hurdle_val = st.columns([3, 1])
 with col_title:
     st.title("📊 Primatech Investment Analyzer")
@@ -147,6 +256,33 @@ if fair_value is not None and investimentos is not None:
     # Se não existir no session_state, criamos; caso exista, não sobrescrevemos
     if 'edited_df' not in st.session_state:
         st.session_state.edited_df = df_empresas.copy()
+    
+    # Sidebar para gerenciamento de cenários
+    with st.sidebar:
+        st.header("Gerenciamento de Cenários")
+        
+        # Seção para criar novo cenário
+        st.subheader("Criar Novo Cenário")
+        st.text_input("Nome do Cenário", key="novo_cenario")
+        salvar_btn = st.button("Salvar Cenário Atual", on_click=salvar_cenario_atual)
+        
+        st.markdown("---")
+        
+        # Seção para selecionar e aplicar cenário
+        st.subheader("Selecionar Cenário")
+        if st.session_state.cenarios_disponiveis:
+            st.selectbox(
+                "Cenários Disponíveis",
+                options=st.session_state.cenarios_disponiveis,
+                key="cenario_selecionado"
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                st.button("Aplicar Cenário", on_click=aplicar_cenario)
+            with col2:
+                st.button("Excluir Cenário", on_click=excluir_cenario)
+        else:
+            st.info("Nenhum cenário salvo. Crie seu primeiro cenário acima.")
     
     # Layout
     col1, col2 = st.columns([2, 1])
@@ -320,73 +456,6 @@ if fair_value is not None and investimentos is not None:
                     st.plotly_chart(fig_uplift, use_container_width=True)
         
         # -----------------------------------------------------------
-        # Análise de Aportes no Tempo (Gráfico trimestral) - SOMA Cumulativa
-        # -----------------------------------------------------------
-        st.subheader("Análise de Aportes no Tempo")
-        try:
-            caminho_parcelas = os.path.join(DIRETORIO_DADOS, 'data_investimentos.xlsx')
-            df_parcelas = pd.read_excel(caminho_parcelas)
-            df_parcelas["Data Investimento"] = pd.to_datetime(
-                df_parcelas["Data Investimento"], 
-                format="%d/%m/%Y", 
-                errors="coerce"
-            )
-            min_date = df_parcelas["Data Investimento"].min()
-        except Exception as e:
-            st.error(f"Erro ao carregar data_investimentos.xlsx: {e}")
-            df_parcelas = pd.DataFrame(columns=["Empresa","Setor","Data Investimento","Valor Investido"])
-            min_date = datetime(1900, 1, 1)
-
-        current_month_first = pd.to_datetime(datetime.now().strftime("%Y-%m-01"))
-
-        if df_parcelas.empty:
-            st.warning("Não há dados em data_investimentos.xlsx para exibir o gráfico cumulativo de investimentos.")
-        else:
-            df_parcelas["Valor Investido"] = (
-                df_parcelas["Valor Investido"]
-                .astype(str)
-                .str.replace("R\\$","", regex=True)
-                .str.replace("\\.","", regex=True)
-                .str.replace(",",".", regex=True)
-            )
-            df_parcelas["Valor Investido"] = pd.to_numeric(df_parcelas["Valor Investido"], errors="coerce")
-
-            df_agrupado = df_parcelas.groupby("Data Investimento", as_index=False)["Valor Investido"].sum()
-            df_agrupado.sort_values("Data Investimento", inplace=True)
-            df_agrupado["SomaCumulativa"] = df_agrupado["Valor Investido"].cumsum()
-
-            daily_index = pd.date_range(start=min_date, end=current_month_first, freq='D')
-            df_agrupado.set_index("Data Investimento", inplace=True)
-            df_agrupado = df_agrupado.reindex(daily_index, method="ffill").fillna(0)
-            df_agrupado.index.name = "Data Investimento"
-
-            fig_temp = go.Figure()
-            fig_temp.add_trace(
-                go.Scatter(
-                    x=daily_index,
-                    y=df_agrupado["SomaCumulativa"],
-                    mode='lines+markers',
-                    line=dict(color='orange'),
-                    marker=dict(color='orange'),
-                    name='Cumulativo'
-                )
-            )
-            fig_temp.update_layout(
-                title="Período de Investimentos (Trimestral) - Soma Cumulativa",
-                xaxis_title="Data",
-                xaxis=dict(
-                    type='date',
-                    range=[min_date, current_month_first],
-                    dtick="M3",
-                    tickformat="%b\n%Y",
-                    tickfont=dict(color='white')
-                ),
-                yaxis=dict(visible=False),
-                template='plotly_dark'
-            )
-            st.plotly_chart(fig_temp, use_container_width=True)
-        
-        # -----------------------------------------------------------
         # Seção de Resultados da Carteira
         # -----------------------------------------------------------
         investimentos_ativos = investimentos[
@@ -460,6 +529,71 @@ if fair_value is not None and investimentos is not None:
     # -----------------------------------------------------------
     with col2:
         st.subheader("📊 Gráficos de Investimentos")
+        
+        # NOVO: Adicionando o gráfico de Análise de Aportes no Tempo como expander na segunda coluna
+        with st.expander("Análise de Aportes no Tempo - Soma Cumulativa", expanded=True):
+            try:
+                caminho_parcelas = os.path.join(DIRETORIO_DADOS, 'data_investimentos.xlsx')
+                df_parcelas = pd.read_excel(caminho_parcelas)
+                df_parcelas["Data Investimento"] = pd.to_datetime(
+                    df_parcelas["Data Investimento"], 
+                    format="%d/%m/%Y", 
+                    errors="coerce"
+                )
+                min_date = df_parcelas["Data Investimento"].min()
+            except Exception as e:
+                st.error(f"Erro ao carregar data_investimentos.xlsx: {e}")
+                df_parcelas = pd.DataFrame(columns=["Empresa","Setor","Data Investimento","Valor Investido"])
+                min_date = datetime(1900, 1, 1)
+
+            current_month_first = pd.to_datetime(datetime.now().strftime("%Y-%m-01"))
+
+            if df_parcelas.empty:
+                st.warning("Não há dados em data_investimentos.xlsx para exibir o gráfico cumulativo de investimentos.")
+            else:
+                df_parcelas["Valor Investido"] = (
+                    df_parcelas["Valor Investido"]
+                    .astype(str)
+                    .str.replace("R\\$","", regex=True)
+                    .str.replace("\\.","", regex=True)
+                    .str.replace(",",".", regex=True)
+                )
+                df_parcelas["Valor Investido"] = pd.to_numeric(df_parcelas["Valor Investido"], errors="coerce")
+
+                df_agrupado = df_parcelas.groupby("Data Investimento", as_index=False)["Valor Investido"].sum()
+                df_agrupado.sort_values("Data Investimento", inplace=True)
+                df_agrupado["SomaCumulativa"] = df_agrupado["Valor Investido"].cumsum()
+
+                daily_index = pd.date_range(start=min_date, end=current_month_first, freq='D')
+                df_agrupado.set_index("Data Investimento", inplace=True)
+                df_agrupado = df_agrupado.reindex(daily_index, method="ffill").fillna(0)
+                df_agrupado.index.name = "Data Investimento"
+
+                fig_temp = go.Figure()
+                fig_temp.add_trace(
+                    go.Scatter(
+                        x=daily_index,
+                        y=df_agrupado["SomaCumulativa"],
+                        mode='lines+markers',
+                        line=dict(color='orange'),
+                        marker=dict(color='orange'),
+                        name='Cumulativo'
+                    )
+                )
+                fig_temp.update_layout(
+                    title="Período de Investimentos (Trimestral) - Soma Cumulativa",
+                    xaxis_title="Data",
+                    xaxis=dict(
+                        type='date',
+                        range=[min_date, current_month_first],
+                        dtick="M3",
+                        tickformat="%b\n%Y",
+                        tickfont=dict(color='white')
+                    ),
+                    yaxis=dict(visible=False),
+                    template='plotly_dark'
+                )
+                st.plotly_chart(fig_temp, use_container_width=True)
         
         with st.expander("Participação do Fundo por Empresa", expanded=True):
             df_ativos = st.session_state.edited_df[st.session_state.edited_df['Múltiplo'] > 0]
