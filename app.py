@@ -17,17 +17,58 @@ def format_brazil(value):
 def update_multiplo():
     comp = st.session_state["select_company"]
     new_val = st.session_state[f"num_{comp}"]
+    
+    # Atualiza múltiplo no DataFrame
     st.session_state.edited_df.loc[
         st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
     ] = new_val
+    
+    # Se o múltiplo for 0, marca como write-off automaticamente
+    if new_val == 0 and not st.session_state[f"writeoff_{comp}"]:
+        st.session_state[f"writeoff_{comp}"] = True
+        st.session_state.edited_df.loc[
+            st.session_state.edited_df["Empresa"] == comp, "Write-off"
+        ] = True
 
 def update_multiplo_slider():
-    time.sleep(1)
     comp = st.session_state["select_company"]
     new_val = st.session_state[f"slider_{comp}"]
+    
+    # Atualiza múltiplo no DataFrame
     st.session_state.edited_df.loc[
         st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
     ] = new_val
+    
+    # Se o múltiplo for 0, marca como write-off automaticamente
+    if new_val == 0 and not st.session_state[f"writeoff_{comp}"]:
+        st.session_state[f"writeoff_{comp}"] = True
+        st.session_state.edited_df.loc[
+            st.session_state.edited_df["Empresa"] == comp, "Write-off"
+        ] = True
+
+def toggle_writeoff():
+    comp = st.session_state["select_company"]
+    is_writeoff = st.session_state[f"writeoff_{comp}"]
+    
+    # Atualiza a coluna Write-off no DataFrame
+    st.session_state.edited_df.loc[
+        st.session_state.edited_df["Empresa"] == comp, "Write-off"
+    ] = is_writeoff
+    
+    # Quando marcar write-off, define como 0
+    if is_writeoff:
+        st.session_state[f"num_{comp}"] = 0.0
+        st.session_state[f"slider_{comp}"] = 0.0
+        st.session_state.edited_df.loc[
+            st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
+        ] = 0.0
+    # Quando desmarcar write-off, define como 1
+    else:
+        st.session_state[f"num_{comp}"] = 1.0
+        st.session_state[f"slider_{comp}"] = 1.0
+        st.session_state.edited_df.loc[
+            st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
+        ] = 1.0
 
 DIRETORIO_ATUAL = os.path.dirname(os.path.abspath(__file__))
 DIRETORIO_DADOS = os.path.join(DIRETORIO_ATUAL, 'data')
@@ -66,16 +107,18 @@ def salvar_cenario_atual():
         st.warning("Por favor, insira um nome para o cenário.")
         return
     
-    # Obtém os múltiplos atuais
-    multiplos = {}
+    # Obtém os múltiplos e status de write-off atuais
+    dados_empresas = {}
     for _, row in st.session_state.edited_df.iterrows():
         empresa = row["Empresa"]
-        multiplo = row["Múltiplo"]
-        multiplos[empresa] = multiplo
+        dados_empresas[empresa] = {
+            "Múltiplo": float(row["Múltiplo"]),
+            "Write-off": bool(row.get("Write-off", False))
+        }
     
     # Carrega cenários existentes e adiciona/atualiza o novo
     cenarios = carregar_cenarios()
-    cenarios[nome_cenario] = multiplos
+    cenarios[nome_cenario] = dados_empresas
     
     # Limita a 5 cenários
     if len(cenarios) > 5:
@@ -99,14 +142,27 @@ def aplicar_cenario():
     cenarios = carregar_cenarios()
     
     if nome_cenario in cenarios:
-        multiplos = cenarios[nome_cenario]
+        dados_empresas = cenarios[nome_cenario]
         
-        # Aplica os múltiplos ao dataframe
-        for empresa, multiplo in multiplos.items():
+        # Aplica os múltiplos e status de write-off ao dataframe
+        for empresa, dados in dados_empresas.items():
             if empresa in st.session_state.edited_df["Empresa"].values:
                 st.session_state.edited_df.loc[
                     st.session_state.edited_df["Empresa"] == empresa, "Múltiplo"
-                ] = multiplo
+                ] = dados.get("Múltiplo", 0.0)
+                
+                st.session_state.edited_df.loc[
+                    st.session_state.edited_df["Empresa"] == empresa, "Write-off"
+                ] = dados.get("Write-off", False)
+                
+                # Atualiza os valores da interface
+                if f"writeoff_{empresa}" in st.session_state:
+                    st.session_state[f"writeoff_{empresa}"] = dados.get("Write-off", False)
+                if f"num_{empresa}" in st.session_state:
+                    st.session_state[f"num_{empresa}"] = dados.get("Múltiplo", 0.0)
+                if f"slider_{empresa}" in st.session_state:
+                    st.session_state[f"slider_{empresa}"] = dados.get("Múltiplo", 0.0)
+                
         st.success(f"Cenário '{nome_cenario}' aplicado com sucesso!")
     else:
         st.error(f"Cenário '{nome_cenario}' não encontrado.")
@@ -141,6 +197,8 @@ def carregar_dados():
         investimentos = pd.read_excel(caminho_investimentos)
         if 'Múltiplo' not in investimentos.columns:
             investimentos['Múltiplo'] = 1.0
+        if 'Write-off' not in investimentos.columns:
+            investimentos['Write-off'] = False
         return fair_value, investimentos
     except FileNotFoundError as e:
         st.error(f"❌ Erro ao carregar os arquivos: {e}")
@@ -242,6 +300,10 @@ if fair_value is not None and investimentos is not None:
     if "Fair Value" not in df_empresas.columns:
         df_empresas["Fair Value"] = np.nan
     
+    # Adicionamos coluna de "Write-off" se não existir
+    if "Write-off" not in df_empresas.columns:
+        df_empresas["Write-off"] = False
+    
     # Preenche Fair Value total do df_empresas
     for i, row in df_empresas.iterrows():
         emp = row["Empresa"]
@@ -256,33 +318,38 @@ if fair_value is not None and investimentos is not None:
     # Se não existir no session_state, criamos; caso exista, não sobrescrevemos
     if 'edited_df' not in st.session_state:
         st.session_state.edited_df = df_empresas.copy()
+    else:
+        # Se o dataframe existe mas não tem a coluna Write-off, adicionamos
+        if "Write-off" not in st.session_state.edited_df.columns:
+            st.session_state.edited_df["Write-off"] = False
     
-    # Sidebar para gerenciamento de cenários
-    with st.sidebar:
-        st.header("Gerenciamento de Cenários")
-        
-        # Seção para criar novo cenário
-        st.subheader("Criar Novo Cenário")
-        st.text_input("Nome do Cenário", key="novo_cenario")
+    # Seção de Cenários - Agora no topo do dashboard
+    st.subheader("Gerenciamento de Cenários")
+    
+    # Layout horizontal para criar, aplicar e excluir cenários
+    col_novo, col_carregar, col_excluir = st.columns([2, 1, 1])
+    
+    with col_novo:
+        st.text_input("Nome do Cenário", key="novo_cenario", placeholder="Digite o nome para salvar")
         salvar_btn = st.button("Salvar Cenário Atual", on_click=salvar_cenario_atual)
-        
-        st.markdown("---")
-        
-        # Seção para selecionar e aplicar cenário
-        st.subheader("Selecionar Cenário")
+    
+    with col_carregar:
         if st.session_state.cenarios_disponiveis:
             st.selectbox(
                 "Cenários Disponíveis",
                 options=st.session_state.cenarios_disponiveis,
                 key="cenario_selecionado"
             )
-            col1, col2 = st.columns(2)
-            with col1:
-                st.button("Aplicar Cenário", on_click=aplicar_cenario)
-            with col2:
-                st.button("Excluir Cenário", on_click=excluir_cenario)
+            st.button("Aplicar Cenário", on_click=aplicar_cenario)
+    
+    with col_excluir:
+        if st.session_state.cenarios_disponiveis:
+            st.write("&nbsp;")  # Espaço para alinhar com o dropdown
+            st.button("Excluir Cenário", on_click=excluir_cenario)
         else:
-            st.info("Nenhum cenário salvo. Crie seu primeiro cenário acima.")
+            st.info("Nenhum cenário salvo.")
+    
+    st.markdown("---")
     
     # Layout
     col1, col2 = st.columns([2, 1])
@@ -292,7 +359,7 @@ if fair_value is not None and investimentos is not None:
         
         col_table, col_placeholder = st.columns([1, 1], gap="small")
         with col_table:
-            new_cols = ["Múltiplo", "Empresa", "Valor Investido", "Fair Value", "Participação do Fundo (%)", "Data do Primeiro Investimento"]
+            new_cols = ["Múltiplo", "Empresa", "Valor Investido", "Fair Value", "Participação do Fundo (%)", "Data do Primeiro Investimento", "Write-off"]
             final_cols = [c for c in new_cols if c in st.session_state.edited_df.columns]
             st.session_state.edited_df = st.session_state.edited_df[final_cols]
             
@@ -304,7 +371,8 @@ if fair_value is not None and investimentos is not None:
                     "Valor Investido": st.column_config.NumberColumn("Valor Investido", format="%.2f"),
                     "Fair Value": st.column_config.NumberColumn("Fair Value", format="%.2f"),
                     "Participação do Fundo (%)": st.column_config.NumberColumn("Participação do Fundo (%)", format="%.2f"),
-                    "Data do Primeiro Investimento": st.column_config.TextColumn("Data do Primeiro Investimento")
+                    "Data do Primeiro Investimento": st.column_config.TextColumn("Data do Primeiro Investimento"),
+                    "Write-off": st.column_config.CheckboxColumn("Write-off", width=80)
                 },
                 use_container_width=True,
                 key="table_edit"
@@ -318,7 +386,21 @@ if fair_value is not None and investimentos is not None:
                 options=edited_df["Empresa"].unique(),
                 key="select_company"
             )
-            current_value = float(edited_df.loc[edited_df["Empresa"] == company_selected, "Múltiplo"].iloc[0])
+            
+            # Obtém os valores atuais
+            current_row = edited_df.loc[edited_df["Empresa"] == company_selected].iloc[0]
+            current_value = float(current_row["Múltiplo"])
+            is_writeoff = bool(current_row.get("Write-off", False))
+            
+            # Adiciona opção de write-off
+            writeoff = st.checkbox(
+                "Write-off (perda total - múltiplo será 0)",
+                value=is_writeoff,
+                key=f"writeoff_{company_selected}",
+                on_change=toggle_writeoff,
+                help="Marque esta opção caso a empresa tenha sido um write-off (perda total)."
+            )
+            
             new_mult = st.number_input(
                 f"Múltiplo para {company_selected}",
                 min_value=0.0,
@@ -329,6 +411,7 @@ if fair_value is not None and investimentos is not None:
                 format="%.1f",
                 on_change=update_multiplo
             )
+            
             slider_val = st.slider(
                 f"Ajuste (Slider) para {company_selected}",
                 min_value=0.0,
@@ -381,7 +464,8 @@ if fair_value is not None and investimentos is not None:
                     'Crescimento Necessário (%)': [uplift_percent],
                     'Participação do Fundo (%)': [pct_fundo],
                     'Múltiplo': [multiplicador],
-                    'Sale': [sale_value]
+                    'Sale': [sale_value],
+                    'Write-off': [row.get('Write-off', False)]
                 })
             ])
         
@@ -509,7 +593,13 @@ if fair_value is not None and investimentos is not None:
 
         st.subheader("Resultados da Carteira")
 
-        total_sale = analise_crescimento["Sale"].sum() if "Sale" in analise_crescimento.columns else 0.0
+        # Calcular total de vendas (excluindo write-offs)
+        vendas = analise_crescimento[~analise_crescimento['Write-off']]
+        total_sale = vendas["Sale"].sum() if "Sale" in vendas.columns else 0.0
+        
+        # Calcular total de write-offs
+        writeoffs = analise_crescimento[analise_crescimento['Write-off']]
+        total_writeoff = writeoffs["Valor Investido"].sum() if not writeoffs.empty else 0.0
         
         # Invertendo a ordem e dando espaço (bargap) entre as barras
         fig_hurdle = go.Figure(data=[
@@ -523,6 +613,10 @@ if fair_value is not None and investimentos is not None:
             title="Hurdle vs Realizado"
         )
         st.plotly_chart(fig_hurdle, use_container_width=True)
+        
+        # Adiciona informação sobre write-offs
+        if total_writeoff > 0:
+            st.info(f"**Write-offs não incluídos no cálculo:** R$ {format_brazil(total_writeoff)} mil")
 
     # -----------------------------------------------------------
     # COLUNA 2: Resumo da Carteira e Gráficos
@@ -594,6 +688,53 @@ if fair_value is not None and investimentos is not None:
                     template='plotly_dark'
                 )
                 st.plotly_chart(fig_temp, use_container_width=True)
+        
+        # Adiciona gráfico para mostrar distribuição de vendas vs write-offs
+        with st.expander("Distribuição de Vendas vs Write-offs", expanded=True):
+            # Separar empresas por status
+            writeoffs_df = st.session_state.edited_df[st.session_state.edited_df['Write-off'] == True]
+            vendas_df = st.session_state.edited_df[(st.session_state.edited_df['Write-off'] == False) & (st.session_state.edited_df['Múltiplo'] > 0)]
+            sem_saida_df = st.session_state.edited_df[(st.session_state.edited_df['Write-off'] == False) & (st.session_state.edited_df['Múltiplo'] == 0)]
+            
+            # Calcular totais
+            total_writeoffs = writeoffs_df['Valor Investido'].sum() if not writeoffs_df.empty else 0
+            total_vendas = vendas_df.apply(lambda row: row['Valor Investido'] * row['Múltiplo'], axis=1).sum() if not vendas_df.empty else 0
+            total_sem_saida = sem_saida_df['Valor Investido'].sum() if not sem_saida_df.empty else 0
+            
+            # Criar dados para gráfico de pizza
+            labels = ['Vendas', 'Write-offs', 'Sem Saída']
+            values = [total_vendas, total_writeoffs, total_sem_saida]
+            colors = ['#4CAF50', '#F44336', '#2196F3']
+            
+            # Filtrar valores zerados
+            non_zero_indices = [i for i, v in enumerate(values) if v > 0]
+            filtered_labels = [labels[i] for i in non_zero_indices]
+            filtered_values = [values[i] for i in non_zero_indices]
+            filtered_colors = [colors[i] for i in non_zero_indices]
+            
+            if filtered_values:
+                fig = go.Figure(data=[go.Pie(
+                    labels=filtered_labels,
+                    values=filtered_values,
+                    marker_colors=filtered_colors,
+                    textinfo='value+percent',
+                    hole=.3,
+                )])
+                fig.update_layout(
+                    title="Distribuição do Valor de Portfólio",
+                    template='plotly_dark'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Adiciona explicação dos valores
+                st.markdown(f"""
+                **Valores Detalhados:**
+                - **Vendas:** R$ {format_brazil(total_vendas)} mil (valor de saída)
+                - **Write-offs:** R$ {format_brazil(total_writeoffs)} mil (valor perdido)
+                - **Sem Saída:** R$ {format_brazil(total_sem_saida)} mil (valor ainda investido)
+                """)
+            else:
+                st.info("Não há dados suficientes para exibir o gráfico de distribuição.")
         
         with st.expander("Participação do Fundo por Empresa", expanded=True):
             df_ativos = st.session_state.edited_df[st.session_state.edited_df['Múltiplo'] > 0]
