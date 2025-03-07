@@ -46,6 +46,28 @@ def update_multiplo_slider():
             st.session_state.edited_df["Empresa"] == comp, "Write-off"
         ] = True
 
+def sincronizar_writeoff_com_multiplos():
+    """
+    Sincroniza o status de write-off com empresas que têm múltiplo zero.
+    Deve ser chamada depois de carregar os dados iniciais.
+    """
+    if 'edited_df' in st.session_state:
+        # Encontra todas as empresas com múltiplo 0
+        empresas_com_multiplo_zero = st.session_state.edited_df[
+            st.session_state.edited_df['Múltiplo'] == 0
+        ]['Empresa'].tolist()
+        
+        # Marca essas empresas como write-off
+        for empresa in empresas_com_multiplo_zero:
+            # Atualiza o DataFrame
+            st.session_state.edited_df.loc[
+                st.session_state.edited_df['Empresa'] == empresa, 'Write-off'
+            ] = True
+            
+            # Também atualiza a variável de session_state se já existir
+            if f"writeoff_{empresa}" in st.session_state:
+                st.session_state[f"writeoff_{empresa}"] = True
+
 def toggle_writeoff():
     comp = st.session_state["select_company"]
     is_writeoff = st.session_state[f"writeoff_{comp}"]
@@ -73,6 +95,34 @@ def toggle_writeoff():
 DIRETORIO_ATUAL = os.path.dirname(os.path.abspath(__file__))
 DIRETORIO_DADOS = os.path.join(DIRETORIO_ATUAL, 'data')
 ARQUIVO_CENARIOS = os.path.join(DIRETORIO_DADOS, 'cenarios.json')
+
+def init_writeoff_status():
+    """
+    Inicializa o status de Write-off para todas as empresas com múltiplo 0.
+    Deve ser chamada logo após carregar os dados.
+    """
+    if 'edited_df' in st.session_state:
+        for _, row in st.session_state.edited_df.iterrows():
+            empresa = row["Empresa"]
+            multiplo = float(row["Múltiplo"])
+            
+            # Se o múltiplo for 0, marca como write-off automaticamente
+            if multiplo == 0:
+                st.session_state.edited_df.loc[
+                    st.session_state.edited_df["Empresa"] == empresa, "Write-off"
+                ] = True
+                
+                # Também atualiza a variável de sessão para o checkbox
+                st.session_state[f"writeoff_{empresa}"] = True
+            else:
+                # Garante que empresas com múltiplo > 0 não estejam marcadas como write-off
+                st.session_state.edited_df.loc[
+                    st.session_state.edited_df["Empresa"] == empresa, "Write-off"
+                ] = False
+                
+                # Também atualiza a variável de sessão para o checkbox (se já existir)
+                if f"writeoff_{empresa}" in st.session_state:
+                    st.session_state[f"writeoff_{empresa}"] = False
 
 # Função para carregar cenários salvos
 def carregar_cenarios():
@@ -323,6 +373,8 @@ if fair_value is not None and investimentos is not None:
         if "Write-off" not in st.session_state.edited_df.columns:
             st.session_state.edited_df["Write-off"] = False
     
+    sincronizar_writeoff_com_multiplos()
+    
     # Seção de Cenários - Agora no topo do dashboard
     st.subheader("Gerenciamento de Cenários")
     
@@ -395,7 +447,7 @@ if fair_value is not None and investimentos is not None:
             # Adiciona opção de write-off
             writeoff = st.checkbox(
                 "Write-off (perda total - múltiplo será 0)",
-                value=is_writeoff,
+                value=bool(current_row.get("Write-off", False)),  # Certifique-se de que está usando o valor do DataFrame
                 key=f"writeoff_{company_selected}",
                 on_change=toggle_writeoff,
                 help="Marque esta opção caso a empresa tenha sido um write-off (perda total)."
