@@ -1,20 +1,68 @@
 {
-    "Conservador": {
-        "Myleus": 0,
-        "TecSUS": 6,
-        "RockHead": 1,
-        "DataBot": 1,
-        "2IM": 3,
-        "Mogai": 5,
-        "FullFace": 0,
-        "GoEpik": 1,
-        "Target": 0,
-        "Autaza": 3,
-        "Vidya": 2,
-        "Sem Processo": 1,
-        "Olho do Dono": 0,
-        "HVEX": 5,
-        "CRM": 1,
-        "GAMA": 1
+    "Base": {
+        "Myleus": {
+            "M\u00faltiplo": 0.0,
+            "Write-off": true
+        },
+        "TecSUS": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "RockHead": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "DataBot": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "2IM": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "Mogai": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "FullFace": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "GoEpik": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "Target": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "Autaza": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "Vidya": {
+            "M\u00faltiplo": 2.0,
+            "Write-off": false
+        },
+        "Sem Processo": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "Olho do Dono": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "HVEX": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "CRM": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        },
+        "GAMA": {
+            "M\u00faltiplo": 1.0,
+            "Write-off": false
+        }
     }
 }

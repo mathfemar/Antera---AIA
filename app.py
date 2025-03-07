@@ -379,7 +379,7 @@ if fair_value is not None and investimentos is not None:
     st.subheader("Gerenciamento de Cenários")
     
     # Layout horizontal para criar, aplicar e excluir cenários
-    col_novo, col_carregar, col_excluir = st.columns([2, 1, 1])
+    col_novo, col_carregar, col_excluir = st.columns([1, 1, 2])
     
     with col_novo:
         st.text_input("Nome do Cenário", key="novo_cenario", placeholder="Digite o nome para salvar")
