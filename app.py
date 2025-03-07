@@ -677,7 +677,7 @@ if fair_value is not None and investimentos is not None:
         st.subheader("📊 Gráficos de Investimentos")
         
         # NOVO: Adicionando o gráfico de Análise de Aportes no Tempo como expander na segunda coluna
-        with st.expander("Análise de Aportes no Tempo - Soma Cumulativa", expanded=True):
+        with st.expander("Análise de Aportes no Tempo - Soma Cumulativa", expanded=False):
             try:
                 caminho_parcelas = os.path.join(DIRETORIO_DADOS, 'data_investimentos.xlsx')
                 df_parcelas = pd.read_excel(caminho_parcelas)
@@ -788,7 +788,7 @@ if fair_value is not None and investimentos is not None:
             else:
                 st.info("Não há dados suficientes para exibir o gráfico de distribuição.")
         
-        with st.expander("Participação do Fundo por Empresa", expanded=True):
+        with st.expander("Participação do Fundo por Empresa", expanded=False):
             df_ativos = st.session_state.edited_df[st.session_state.edited_df['Múltiplo'] > 0]
             fig_port = go.Figure(data=[go.Bar(
                 x=df_ativos['Empresa'],
@@ -827,7 +827,7 @@ if fair_value is not None and investimentos is not None:
             )
             st.plotly_chart(fig, use_container_width=True)
         
-        with st.expander(f"Comparativo: Valor Aprovado vs Valor Investido (Total Investido: R$ {total_investido:.2f} MM)", expanded=True):
+        with st.expander(f"Comparativo: Valor Aprovado vs Valor Investido (Total Investido: R$ {total_investido:.2f} MM)", expanded=False):
             empresas = investimentos_ativos['Empresa']
             valores_aprovados = investimentos_ativos['Valor Aprovado em CI (R$ mil)']
             valores_investidos = investimentos_ativos['Valor Investido']
@@ -854,7 +854,7 @@ if fair_value is not None and investimentos is not None:
             )
             st.plotly_chart(fig, use_container_width=True)
         
-        with st.expander(f"Montante Total Investido Corrigido pelo IPCA (R$ {total_ipca:.2f} MM)", expanded=True):
+        with st.expander(f"Montante Total Investido Corrigido pelo IPCA (R$ {total_ipca:.2f} MM)", expanded=False):
             investimentos_ativos['Valor Corrigido IPCA'] = investimentos_ativos.apply(
                 lambda row: corrigir_ipca(
                     row['Valor Investido'],
@@ -868,7 +868,7 @@ if fair_value is not None and investimentos is not None:
                 'Valor Corrigido'
             )
         
-        with st.expander(f"Montante Total Investido Corrigido pelo IPCA+6% (R$ {total_ipca_6:.2f} MM)", expanded=True):
+        with st.expander(f"Montante Total Investido Corrigido pelo IPCA+6% (R$ {total_ipca_6:.2f} MM)", expanded=False):
             investimentos_ativos['Valor Corrigido IPCA+6%'] = investimentos_ativos.apply(
                 lambda row: corrigir_ipca(
                     row['Valor Investido'],
@@ -883,7 +883,7 @@ if fair_value is not None and investimentos is not None:
                 'Valor Corrigido'
             )
         
-        with st.expander(f"Montante Total Investido Corrigido pelo IPCA+{hurdle}% (R$ {total_ipca_hurdle:.2f} MM)", expanded=True):
+        with st.expander(f"Montante Total Investido Corrigido pelo IPCA+{hurdle}% (R$ {total_ipca_hurdle:.2f} MM)", expanded=False):
             investimentos_ativos['Valor Corrigido IPCA+Hurdle'] = investimentos_ativos.apply(
                 lambda row: corrigir_ipca(
                     row['Valor Investido'],
