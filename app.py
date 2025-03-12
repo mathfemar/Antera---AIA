@@ -369,7 +369,7 @@ if 'novo_cenario' not in st.session_state:
 
 col_title, col_hurdle_val = st.columns([3, 1])
 with col_title:
-    st.title("📊 Primatech Investment Analyzer")
+    st.title("Primatech Investment Analyzer")
 with col_hurdle_val:
     hurdle_nominal = st.number_input("Hurdle (R$):", value=117000.0, step=1000.0, format="%.0f")
     st.write(f"Hurdle: R$ {format_brazil(hurdle_nominal)}")
@@ -526,7 +526,7 @@ if fair_value is not None and investimentos is not None:
             )
         
         st.markdown("---")
-        st.subheader("📈 Crescimento Necessário por Empresa (IPCA+6%)")
+        st.subheader("Crescimento Necessário por Empresa (IPCA+6%)")
         col_table2, col_graph = st.columns([1, 1])
         
         active_investments = st.session_state.edited_df[
@@ -603,42 +603,67 @@ if fair_value is not None and investimentos is not None:
                     multiplicador = linha['Múltiplo']
                     sale = linha['Sale']
                     
-                    x_positions = [0, 1, 2, 3]
+                    x_positions = ['Investido', 'FV Part.', 'IPCA+6%', 'Sale']
                     bar_colors = ['#2196F3', '#FF9800', '#4CAF50', '#9C27B0']
-                    tick_text = [
-                        f"Investido: R$ {format_brazil(investido)}k",
-                        f"FV Part.: R$ {format_brazil(fv_part if pd.notna(fv_part) else 0)}k",
-                        f"IPCA+6%: R$ {format_brazil(necessario)}k",
-                        f"Sale: R$ {format_brazil(sale)}k"
-                    ]
+                    values = [investido, fv_part if pd.notna(fv_part) else 0, necessario, sale]
                     
-                    if pd.notna(fv_part) and fv_part != 0:
-                        uplift_adjusted = ((necessario - fv_part) / fv_part) * 100
-                        if uplift_adjusted >= 0:
-                            title_text = f"Uplift de +{uplift_adjusted:.2f}%"
-                        else:
-                            over = (fv_part / necessario) * 100 if necessario != 0 else 0
-                            title_text = f"Overperformance de {over:.2f}%"
-                    else:
-                        title_text = "Sem dados suficientes"
+                    # Calcula a relação em relação ao IPCA+6% de forma consistente
+                    fv_to_ipca_percent = "N/A"
+                    if pd.notna(fv_part) and necessario != 0:
+                        # Calcula quanto o FV Part. representa do IPCA+6%
+                        fv_to_ipca_value = (fv_part / necessario) * 100
+                        fv_to_ipca_percent = f"{fv_to_ipca_value:.2f}%"
                     
-                    fig_uplift = go.Figure([
-                        go.Bar(
-                            x=x_positions,
-                            y=[investido, fv_part if pd.notna(fv_part) else 0, necessario, sale],
-                            marker_color=bar_colors
-                        )
-                    ])
+                    sale_to_ipca_percent = "N/A"
+                    if necessario != 0:
+                        # Calcula quanto o Sale representa do IPCA+6%
+                        sale_to_ipca_value = (sale / necessario) * 100
+                        sale_to_ipca_percent = f"{sale_to_ipca_value:.2f}%"
+                    
+                    # Encontrar o valor máximo para ajustar o intervalo do eixo Y
+                    max_value = max(values)
+                    
+                    # Criando um gráfico simplificado
+                    fig_uplift = go.Figure()
+                    
+                    # Adicionando barras com textos em branco e acima das barras
+                    for i, (x, y, color) in enumerate(zip(x_positions, values, bar_colors)):
+                        fig_uplift.add_trace(go.Bar(
+                            x=[x],
+                            y=[y],
+                            name=x,
+                            marker_color=color,
+                            text=f'R$ {format_brazil(y)}k',
+                            textposition='outside',  # Posiciona o texto acima da barra
+                            textfont=dict(color='white')  # Define a cor do texto como branco
+                        ))
+                    
+                    # Título com cálculos consistentes para ambos os indicadores
+                    title_text = f'<span style="color:white;">Análise de Uplift para {empresa_sel}</span><br>'
+                    # Agora ambos mostram a relação percentual com IPCA+6%
+                    title_text += f'<span style="color:#FF9800;">FV Part.</span><span style="color:white;"> → </span><span style="color:#4CAF50;">IPCA+6%</span><span style="color:white;">: {fv_to_ipca_percent}</span><br>'
+                    title_text += f'<span style="color:#9C27B0;">Sale</span><span style="color:white;"> → </span><span style="color:#4CAF50;">IPCA+6%</span><span style="color:white;">: {sale_to_ipca_percent}</span>'
+                    
                     fig_uplift.update_layout(
-                        title=title_text,
+                        title={
+                            'text': title_text,
+                            'y': 0.95,
+                            'x': 0.5,
+                            'xanchor': 'center',
+                            'yanchor': 'top'
+                        },
                         yaxis_title='Valores (R$ mil)',
-                        xaxis=dict(
-                            tickmode='array',
-                            tickvals=x_positions,
-                            ticktext=tick_text
-                        ),
-                        template='plotly_dark'
+                        template='plotly_dark',
+                        margin=dict(t=150, r=50, b=100),  # Aumentar margem superior e inferior
+                        showlegend=False,
+                        barmode='group',
+                        height=550,  # Aumentar altura do gráfico
+                        # Configurar o intervalo do eixo Y para não cortar os valores
+                        yaxis=dict(
+                            range=[0, max_value * 1.15]  # Adiciona 15% de espaço acima do valor máximo
+                        )
                     )
+                    
                     st.plotly_chart(fig_uplift, use_container_width=True)
         
         # -----------------------------------------------------------
@@ -724,7 +749,7 @@ if fair_value is not None and investimentos is not None:
     # COLUNA 2: Resumo da Carteira e Gráficos
     # -----------------------------------------------------------
     with col2:
-        st.subheader("📊 Gráficos de Investimentos")
+        st.subheader("Gráficos de Investimentos")
         
         # NOVO: Adicionando o gráfico de Análise de Aportes no Tempo como expander na segunda coluna
         with st.expander("Análise de Aportes no Tempo - Soma Cumulativa", expanded=False):
