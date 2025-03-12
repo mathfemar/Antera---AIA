@@ -549,10 +549,7 @@ if fair_value is not None and investimentos is not None:
                 fv_part = np.nan
             
             multiplicador = row['Múltiplo']
-            if pd.notna(fv_part) and fv_part != 0:
-                uplift_percent = ((valor_necessario - fv_part) / fv_part) * 100
-            else:
-                uplift_percent = np.nan
+            # Removemos o cálculo de uplift_percent (Crescimento Necessário)
             
             sale_value = valor_investido * multiplicador
             
@@ -562,22 +559,24 @@ if fair_value is not None and investimentos is not None:
                     'Empresa': [row['Empresa']],
                     'Valor Investido': [valor_investido],
                     'FV Part.': [fv_part],
-                    'IPCA+6%: Valor': [valor_necessario],
-                    'Crescimento Necessário (%)': [uplift_percent],
+                    'IPCA+6%': [valor_necessario],  # Renomeado de "IPCA+6%: Valor" para "IPCA+6%"
                     'Participação do Fundo (%)': [pct_fundo],
                     'Múltiplo': [multiplicador],
                     'Sale': [sale_value],
                     'Write-off': [row.get('Write-off', False)]
                 })
             ])
-        
+
+        # Modificação 2: Cálculo do Peso na Carteira
+        # Após o loop acima, adicionar:
+
         valor_total_fv_part = analise_crescimento["FV Part."].sum()
         if valor_total_fv_part != 0:
-            analise_crescimento["Peso na Carteira (%)"] = (
+            analise_crescimento["Peso na Carteira"] = (
                 analise_crescimento["FV Part."] / valor_total_fv_part
             ) * 100
         else:
-            analise_crescimento["Peso na Carteira (%)"] = 0
+            analise_crescimento["Peso na Carteira"] = 0
         
         with col_table2:
             st.markdown("**Tabela de Crescimento**")
@@ -598,7 +597,7 @@ if fair_value is not None and investimentos is not None:
                     linha = filtered.iloc[0]
                     investido = linha['Valor Investido']
                     fv_part = linha['FV Part.']
-                    necessario = linha['IPCA+6%: Valor']
+                    necessario = linha['IPCA+6%']
                     pct_fundo = linha['Participação do Fundo (%)']
                     multiplicador = linha['Múltiplo']
                     sale = linha['Sale']
