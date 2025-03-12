@@ -23,12 +23,21 @@ def update_multiplo():
         st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
     ] = new_val
     
+    # Atualiza também o slider para manter sincronizado
+    st.session_state[f"slider_{comp}"] = new_val
+    
     # Se o múltiplo for 0, marca como write-off automaticamente
-    if new_val == 0 and not st.session_state[f"writeoff_{comp}"]:
+    if new_val == 0:
         st.session_state[f"writeoff_{comp}"] = True
         st.session_state.edited_df.loc[
             st.session_state.edited_df["Empresa"] == comp, "Write-off"
         ] = True
+    # Se o múltiplo for maior que 0, desmarca write-off automaticamente
+    else:
+        st.session_state[f"writeoff_{comp}"] = False
+        st.session_state.edited_df.loc[
+            st.session_state.edited_df["Empresa"] == comp, "Write-off"
+        ] = False
 
 def update_multiplo_slider():
     comp = st.session_state["select_company"]
@@ -39,12 +48,21 @@ def update_multiplo_slider():
         st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
     ] = new_val
     
+    # Atualiza também o campo numérico para manter sincronizado
+    st.session_state[f"num_{comp}"] = new_val
+    
     # Se o múltiplo for 0, marca como write-off automaticamente
-    if new_val == 0 and not st.session_state[f"writeoff_{comp}"]:
+    if new_val == 0:
         st.session_state[f"writeoff_{comp}"] = True
         st.session_state.edited_df.loc[
             st.session_state.edited_df["Empresa"] == comp, "Write-off"
         ] = True
+    # Se o múltiplo for maior que 0, desmarca write-off automaticamente
+    else:
+        st.session_state[f"writeoff_{comp}"] = False
+        st.session_state.edited_df.loc[
+            st.session_state.edited_df["Empresa"] == comp, "Write-off"
+        ] = False
 
 def sincronizar_writeoff_com_multiplos():
     """
@@ -92,6 +110,32 @@ def toggle_writeoff():
             st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
         ] = 1.0
 
+def sincronizar_multiplo_writeoff():
+    """
+    Assegura que a relação entre múltiplo e write-off esteja consistente.
+    Deve ser chamada sempre que carregar a interface para uma empresa.
+    """
+    if 'select_company' in st.session_state:
+        comp = st.session_state["select_company"]
+        try:
+            multiplo = st.session_state[f"num_{comp}"]
+            
+            # Se o múltiplo for zero, o write-off deve estar marcado
+            if multiplo == 0:
+                st.session_state[f"writeoff_{comp}"] = True
+                st.session_state.edited_df.loc[
+                    st.session_state.edited_df["Empresa"] == comp, "Write-off"
+                ] = True
+            # Se o múltiplo for maior que zero, o write-off não deve estar marcado
+            else:
+                st.session_state[f"writeoff_{comp}"] = False
+                st.session_state.edited_df.loc[
+                    st.session_state.edited_df["Empresa"] == comp, "Write-off"
+                ] = False
+        except:
+            # Se a empresa ainda não está no sistema, não faz nada
+            pass
+
 DIRETORIO_ATUAL = os.path.dirname(os.path.abspath(__file__))
 DIRETORIO_DADOS = os.path.join(DIRETORIO_ATUAL, 'data')
 ARQUIVO_CENARIOS = os.path.join(DIRETORIO_DADOS, 'cenarios.json')
@@ -120,9 +164,9 @@ def init_writeoff_status():
                     st.session_state.edited_df["Empresa"] == empresa, "Write-off"
                 ] = False
                 
-                # Também atualiza a variável de sessão para o checkbox (se já existir)
-                if f"writeoff_{empresa}" in st.session_state:
-                    st.session_state[f"writeoff_{empresa}"] = False
+                # Também atualiza a variável de sessão para o checkbox
+                # Inicializa se não existir
+                st.session_state[f"writeoff_{empresa}"] = False
 
 # Função para carregar cenários salvos
 def carregar_cenarios():
@@ -374,17 +418,20 @@ if fair_value is not None and investimentos is not None:
             st.session_state.edited_df["Write-off"] = False
     
     sincronizar_writeoff_com_multiplos()
+    init_writeoff_status()
     
     # Seção de Cenários - Agora no topo do dashboard
     st.subheader("Gerenciamento de Cenários")
     
     # Layout horizontal para criar, aplicar e excluir cenários
-    col_novo, col_carregar, col_excluir = st.columns([1, 1, 2])
-    
+    col_novo, col_carregar = st.columns(2)
+
     with col_novo:
         st.text_input("Nome do Cenário", key="novo_cenario", placeholder="Digite o nome para salvar")
-        salvar_btn = st.button("Salvar Cenário Atual", on_click=salvar_cenario_atual)
-    
+        # Container para o botão salvar, ocupando toda a largura
+        container_salvar = st.container()
+        container_salvar.button("Salvar Cenário Atual", on_click=salvar_cenario_atual, use_container_width=True)
+
     with col_carregar:
         if st.session_state.cenarios_disponiveis:
             st.selectbox(
@@ -392,12 +439,15 @@ if fair_value is not None and investimentos is not None:
                 options=st.session_state.cenarios_disponiveis,
                 key="cenario_selecionado"
             )
-            st.button("Aplicar Cenário", on_click=aplicar_cenario)
-    
-    with col_excluir:
-        if st.session_state.cenarios_disponiveis:
-            st.write("&nbsp;")  # Espaço para alinhar com o dropdown
-            st.button("Excluir Cenário", on_click=excluir_cenario)
+            
+            # Usar container para os botões
+            container = st.container()
+            # Criar os botões lado a lado sem espaço entre eles
+            col1, col2 = container.columns([1, 1], gap="small")
+            with col1:
+                st.button("Aplicar Cenário", on_click=aplicar_cenario, use_container_width=True)
+            with col2:
+                st.button("Excluir Cenário", on_click=excluir_cenario, use_container_width=True)
         else:
             st.info("Nenhum cenário salvo.")
     
