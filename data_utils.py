@@ -19,7 +19,7 @@ DIRETORIO_DADOS = os.path.join(DIRETORIO_ATUAL, 'data')
 @st.cache_data
 def carregar_dados():
     """
-    Lê os arquivos investments.xlsx e fair_value.xlsx,
+    Lê os arquivos fair_value.xlsx e investimentos.xlsx,
     garantindo a existência das colunas necessárias.
     """
     try:
@@ -31,6 +31,8 @@ def carregar_dados():
         investimentos = pd.read_excel(caminho_investimentos)
         if 'Múltiplo' not in investimentos.columns:
             investimentos['Múltiplo'] = 1.0
+        if 'Write-off' not in investimentos.columns:
+            investimentos['Write-off'] = False
         return fair_value, investimentos
     except FileNotFoundError as e:
         st.error(f"❌ Erro ao carregar os arquivos: {e}")
@@ -100,5 +102,33 @@ def corrigir_ipca(valor, data_investimento, adicional=0.0):
     ipca_acum = calcular_ipca_acumulado(data_investimento)
     anos = (pd.Timestamp.now() - data_investimento).days / 365.25
     valor_corrigido_ipca = valor * (1 + ipca_acum)
-    valor_final = valor_corrigido_ipca * (1 + adicional/100) ** anos
+    valor_final = valor_corrigido_ipca * ((1 + adicional/100) ** anos)
     return valor_final
+
+def carregar_parcelas_investimento():
+    """
+    Carrega dados de parcelas de investimento para análise de aportes no tempo.
+    """
+    try:
+        caminho_parcelas = os.path.join(DIRETORIO_DADOS, 'data_investimentos.xlsx')
+        df_parcelas = pd.read_excel(caminho_parcelas)
+        df_parcelas["Data Investimento"] = pd.to_datetime(
+            df_parcelas["Data Investimento"], 
+            format="%d/%m/%Y", 
+            errors="coerce"
+        )
+        
+        # Converter valores de investimento para formato numérico
+        df_parcelas["Valor Investido"] = (
+            df_parcelas["Valor Investido"]
+            .astype(str)
+            .str.replace("R\\$","", regex=True)
+            .str.replace("\\.","", regex=True)
+            .str.replace(",",".", regex=True)
+        )
+        df_parcelas["Valor Investido"] = pd.to_numeric(df_parcelas["Valor Investido"], errors="coerce")
+        
+        return df_parcelas
+    except Exception as e:
+        st.error(f"Erro ao carregar data_investimentos.xlsx: {e}")
+        return pd.DataFrame(columns=["Empresa", "Setor", "Data Investimento", "Valor Investido"])

@@ -4,355 +4,42 @@ import numpy as np
 from datetime import datetime
 import os
 import requests
-import time
 import plotly.graph_objects as go
 import plotly.express as px
-import json
 
-# Função para formatar número no padrão BR
-def format_brazil(value):
-    formatted = f"{value:,.2f}"
-    return formatted.replace(',', 'X').replace('.', ',').replace('X', '.')
+# Importa os módulos personalizados
+from modules.portfolio import (
+    init_writeoff_status, 
+    sincronizar_writeoff_com_multiplos, 
+    sincronizar_multiplo_writeoff,
+    preparar_dados_iniciais,
+    gerar_analise_crescimento
+)
+from modules.scenarios import (
+    carregar_cenarios, 
+    salvar_cenario_atual, 
+    aplicar_cenario, 
+    excluir_cenario,
+    inicializar_session_state_cenarios
+)
+from modules.visualizations import (
+    format_brazil,
+    criar_grafico_aportes_no_tempo,
+    criar_grafico_distribuicao_portfolio,
+    criar_grafico_participacao_fundo,
+    criar_grafico_hurdle_vs_realizado,
+    criar_grafico_uplift_empresa,
+    criar_comparativo_valores,
+    plot_comparativo
+)
 
-def update_multiplo():
-    comp = st.session_state["select_company"]
-    new_val = st.session_state[f"num_{comp}"]
-    
-    # Atualiza múltiplo no DataFrame
-    st.session_state.edited_df.loc[
-        st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
-    ] = new_val
-    
-    # Atualiza também o slider para manter sincronizado
-    st.session_state[f"slider_{comp}"] = new_val
-    
-    # Se o múltiplo for 0, marca como write-off automaticamente
-    if new_val == 0:
-        st.session_state[f"writeoff_{comp}"] = True
-        st.session_state.edited_df.loc[
-            st.session_state.edited_df["Empresa"] == comp, "Write-off"
-        ] = True
-    # Se o múltiplo for maior que 0, desmarca write-off automaticamente
-    else:
-        st.session_state[f"writeoff_{comp}"] = False
-        st.session_state.edited_df.loc[
-            st.session_state.edited_df["Empresa"] == comp, "Write-off"
-        ] = False
+# Importa as funções dos arquivos existentes
+from callbacks import update_multiplo, update_multiplo_slider, toggle_writeoff
+from data_utils import carregar_dados, obter_ipca, calcular_ipca_acumulado, corrigir_ipca, carregar_parcelas_investimento
 
-def update_multiplo_slider():
-    comp = st.session_state["select_company"]
-    new_val = st.session_state[f"slider_{comp}"]
-    
-    # Atualiza múltiplo no DataFrame
-    st.session_state.edited_df.loc[
-        st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
-    ] = new_val
-    
-    # Atualiza também o campo numérico para manter sincronizado
-    st.session_state[f"num_{comp}"] = new_val
-    
-    # Se o múltiplo for 0, marca como write-off automaticamente
-    if new_val == 0:
-        st.session_state[f"writeoff_{comp}"] = True
-        st.session_state.edited_df.loc[
-            st.session_state.edited_df["Empresa"] == comp, "Write-off"
-        ] = True
-    # Se o múltiplo for maior que 0, desmarca write-off automaticamente
-    else:
-        st.session_state[f"writeoff_{comp}"] = False
-        st.session_state.edited_df.loc[
-            st.session_state.edited_df["Empresa"] == comp, "Write-off"
-        ] = False
-
-def sincronizar_writeoff_com_multiplos():
-    """
-    Sincroniza o status de write-off com empresas que têm múltiplo zero.
-    Deve ser chamada depois de carregar os dados iniciais.
-    """
-    if 'edited_df' in st.session_state:
-        # Encontra todas as empresas com múltiplo 0
-        empresas_com_multiplo_zero = st.session_state.edited_df[
-            st.session_state.edited_df['Múltiplo'] == 0
-        ]['Empresa'].tolist()
-        
-        # Marca essas empresas como write-off
-        for empresa in empresas_com_multiplo_zero:
-            # Atualiza o DataFrame
-            st.session_state.edited_df.loc[
-                st.session_state.edited_df['Empresa'] == empresa, 'Write-off'
-            ] = True
-            
-            # Também atualiza a variável de session_state se já existir
-            if f"writeoff_{empresa}" in st.session_state:
-                st.session_state[f"writeoff_{empresa}"] = True
-
-def toggle_writeoff():
-    comp = st.session_state["select_company"]
-    is_writeoff = st.session_state[f"writeoff_{comp}"]
-    
-    # Atualiza a coluna Write-off no DataFrame
-    st.session_state.edited_df.loc[
-        st.session_state.edited_df["Empresa"] == comp, "Write-off"
-    ] = is_writeoff
-    
-    # Quando marcar write-off, define como 0
-    if is_writeoff:
-        st.session_state[f"num_{comp}"] = 0.0
-        st.session_state[f"slider_{comp}"] = 0.0
-        st.session_state.edited_df.loc[
-            st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
-        ] = 0.0
-    # Quando desmarcar write-off, define como 1
-    else:
-        st.session_state[f"num_{comp}"] = 1.0
-        st.session_state[f"slider_{comp}"] = 1.0
-        st.session_state.edited_df.loc[
-            st.session_state.edited_df["Empresa"] == comp, "Múltiplo"
-        ] = 1.0
-
-def sincronizar_multiplo_writeoff():
-    """
-    Assegura que a relação entre múltiplo e write-off esteja consistente.
-    Deve ser chamada sempre que carregar a interface para uma empresa.
-    """
-    if 'select_company' in st.session_state:
-        comp = st.session_state["select_company"]
-        try:
-            multiplo = st.session_state[f"num_{comp}"]
-            
-            # Se o múltiplo for zero, o write-off deve estar marcado
-            if multiplo == 0:
-                st.session_state[f"writeoff_{comp}"] = True
-                st.session_state.edited_df.loc[
-                    st.session_state.edited_df["Empresa"] == comp, "Write-off"
-                ] = True
-            # Se o múltiplo for maior que zero, o write-off não deve estar marcado
-            else:
-                st.session_state[f"writeoff_{comp}"] = False
-                st.session_state.edited_df.loc[
-                    st.session_state.edited_df["Empresa"] == comp, "Write-off"
-                ] = False
-        except:
-            # Se a empresa ainda não está no sistema, não faz nada
-            pass
-
+# Diretórios para localizar arquivos
 DIRETORIO_ATUAL = os.path.dirname(os.path.abspath(__file__))
 DIRETORIO_DADOS = os.path.join(DIRETORIO_ATUAL, 'data')
-ARQUIVO_CENARIOS = os.path.join(DIRETORIO_DADOS, 'cenarios.json')
-
-def init_writeoff_status():
-    """
-    Inicializa o status de Write-off para todas as empresas com múltiplo 0.
-    Deve ser chamada logo após carregar os dados.
-    """
-    if 'edited_df' in st.session_state:
-        for _, row in st.session_state.edited_df.iterrows():
-            empresa = row["Empresa"]
-            multiplo = float(row["Múltiplo"])
-            
-            # Se o múltiplo for 0, marca como write-off automaticamente
-            if multiplo == 0:
-                st.session_state.edited_df.loc[
-                    st.session_state.edited_df["Empresa"] == empresa, "Write-off"
-                ] = True
-                
-                # Também atualiza a variável de sessão para o checkbox
-                st.session_state[f"writeoff_{empresa}"] = True
-            else:
-                # Garante que empresas com múltiplo > 0 não estejam marcadas como write-off
-                st.session_state.edited_df.loc[
-                    st.session_state.edited_df["Empresa"] == empresa, "Write-off"
-                ] = False
-                
-                # Também atualiza a variável de sessão para o checkbox
-                # Inicializa se não existir
-                st.session_state[f"writeoff_{empresa}"] = False
-
-# Função para carregar cenários salvos
-def carregar_cenarios():
-    try:
-        if os.path.exists(ARQUIVO_CENARIOS):
-            with open(ARQUIVO_CENARIOS, 'r') as f:
-                return json.load(f)
-        else:
-            return {}  # Retorna dicionário vazio se o arquivo não existir
-    except Exception as e:
-        st.error(f"Erro ao carregar cenários: {e}")
-        return {}
-
-# Função para salvar cenários
-def salvar_cenarios(cenarios):
-    try:
-        # Certifique-se que o diretório existe
-        if not os.path.exists(DIRETORIO_DADOS):
-            os.makedirs(DIRETORIO_DADOS)
-            
-        with open(ARQUIVO_CENARIOS, 'w') as f:
-            json.dump(cenarios, f, indent=4)
-        return True
-    except Exception as e:
-        st.error(f"Erro ao salvar cenários: {e}")
-        return False
-
-# Função para salvar cenário atual
-def salvar_cenario_atual():
-    nome_cenario = st.session_state.novo_cenario
-    if not nome_cenario or nome_cenario.strip() == "":
-        st.warning("Por favor, insira um nome para o cenário.")
-        return
-    
-    # Obtém os múltiplos e status de write-off atuais
-    dados_empresas = {}
-    for _, row in st.session_state.edited_df.iterrows():
-        empresa = row["Empresa"]
-        dados_empresas[empresa] = {
-            "Múltiplo": float(row["Múltiplo"]),
-            "Write-off": bool(row.get("Write-off", False))
-        }
-    
-    # Carrega cenários existentes e adiciona/atualiza o novo
-    cenarios = carregar_cenarios()
-    cenarios[nome_cenario] = dados_empresas
-    
-    # Limita a 5 cenários
-    if len(cenarios) > 5:
-        # Remove o mais antigo
-        oldest_key = list(cenarios.keys())[0]
-        cenarios.pop(oldest_key)
-    
-    # Salva o arquivo atualizado
-    if salvar_cenarios(cenarios):
-        st.success(f"Cenário '{nome_cenario}' salvo com sucesso!")
-        # Atualiza a lista de seleção
-        st.session_state.cenarios_disponiveis = list(carregar_cenarios().keys())
-        # Limpa o campo de texto
-        st.session_state.novo_cenario = ""
-    else:
-        st.error("Erro ao salvar o cenário.")
-
-# Função para aplicar um cenário selecionado
-def aplicar_cenario():
-    nome_cenario = st.session_state.cenario_selecionado
-    cenarios = carregar_cenarios()
-    
-    if nome_cenario in cenarios:
-        dados_empresas = cenarios[nome_cenario]
-        
-        # Aplica os múltiplos e status de write-off ao dataframe
-        for empresa, dados in dados_empresas.items():
-            if empresa in st.session_state.edited_df["Empresa"].values:
-                st.session_state.edited_df.loc[
-                    st.session_state.edited_df["Empresa"] == empresa, "Múltiplo"
-                ] = dados.get("Múltiplo", 0.0)
-                
-                st.session_state.edited_df.loc[
-                    st.session_state.edited_df["Empresa"] == empresa, "Write-off"
-                ] = dados.get("Write-off", False)
-                
-                # Atualiza os valores da interface
-                if f"writeoff_{empresa}" in st.session_state:
-                    st.session_state[f"writeoff_{empresa}"] = dados.get("Write-off", False)
-                if f"num_{empresa}" in st.session_state:
-                    st.session_state[f"num_{empresa}"] = dados.get("Múltiplo", 0.0)
-                if f"slider_{empresa}" in st.session_state:
-                    st.session_state[f"slider_{empresa}"] = dados.get("Múltiplo", 0.0)
-                
-        st.success(f"Cenário '{nome_cenario}' aplicado com sucesso!")
-    else:
-        st.error(f"Cenário '{nome_cenario}' não encontrado.")
-
-# Função para excluir um cenário
-def excluir_cenario():
-    nome_cenario = st.session_state.cenario_selecionado
-    cenarios = carregar_cenarios()
-    
-    if nome_cenario in cenarios:
-        cenarios.pop(nome_cenario)
-        if salvar_cenarios(cenarios):
-            st.success(f"Cenário '{nome_cenario}' excluído com sucesso!")
-            # Atualiza a lista de seleção
-            st.session_state.cenarios_disponiveis = list(carregar_cenarios().keys())
-            # Limpa a seleção
-            if st.session_state.cenarios_disponiveis:
-                st.session_state.cenario_selecionado = st.session_state.cenarios_disponiveis[0]
-            else:
-                st.session_state.cenario_selecionado = ""
-        else:
-            st.error("Erro ao excluir o cenário.")
-    else:
-        st.error(f"Cenário '{nome_cenario}' não encontrado.")
-
-@st.cache_data
-def carregar_dados():
-    try:
-        caminho_fair_value = os.path.join(DIRETORIO_DADOS, 'fair_value.xlsx')
-        caminho_investimentos = os.path.join(DIRETORIO_DADOS, 'investimentos.xlsx')
-        fair_value = pd.read_excel(caminho_fair_value)
-        investimentos = pd.read_excel(caminho_investimentos)
-        if 'Múltiplo' not in investimentos.columns:
-            investimentos['Múltiplo'] = 1.0
-        if 'Write-off' not in investimentos.columns:
-            investimentos['Write-off'] = False
-        return fair_value, investimentos
-    except FileNotFoundError as e:
-        st.error(f"❌ Erro ao carregar os arquivos: {e}")
-        return None, None
-    except Exception as e:
-        st.error(f"❌ Erro inesperado ao carregar os arquivos: {e}")
-        return None, None
-
-@st.cache_data
-def obter_ipca():
-    try:
-        url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.433/dados?formato=json"
-        response = requests.get(url)
-        if response.status_code == 200:
-            if not response.text:
-                st.error("A API do BCB retornou resposta vazia. Usando valor fixo de IPCA.")
-                return None
-            try:
-                json_data = response.json()
-            except ValueError as ve:
-                st.error(f"Erro ao decodificar JSON do BCB: {ve}. Usando valor fixo de IPCA.")
-                return None
-            if not json_data:
-                st.error("A API do BCB não retornou dados. Usando valor fixo de IPCA.")
-                return None
-            dados = pd.DataFrame(json_data)
-            if 'data' not in dados.columns or 'valor' not in dados.columns:
-                st.error("Resposta da API não contém os dados esperados. Usando valor fixo de IPCA.")
-                return None
-            dados['data'] = pd.to_datetime(dados['data'], format='%d/%m/%Y')
-            dados['valor'] = pd.to_numeric(dados['valor'], errors='coerce')
-            dados.dropna(subset=['valor'], inplace=True)
-            dados.set_index('data', inplace=True)
-            dados['variacao_decimal'] = dados['valor'] / 100
-            return dados
-        else:
-            st.error("Erro ao acessar API do BCB. Status code: " + str(response.status_code))
-            return None
-    except Exception as e:
-        st.error(f"Erro ao obter IPCA: {e}. Usando valor fixo de IPCA.")
-        return None
-
-def calcular_ipca_acumulado(data_inicial):
-    df_ipca = obter_ipca()
-    if df_ipca is None:
-        # Se der erro, usaremos um valor fixo de ~4,5%
-        return 0.045
-    data_inicial = pd.to_datetime(data_inicial)
-    mask = (df_ipca.index >= data_inicial)
-    ipca_periodo = df_ipca[mask]
-    ipca_acumulado = np.prod(1 + ipca_periodo['variacao_decimal']) - 1
-    return ipca_acumulado
-
-def corrigir_ipca(valor, data_investimento, adicional=0.0):
-    data_investimento = pd.to_datetime(data_investimento)
-    ipca_acum = calcular_ipca_acumulado(data_investimento)
-    anos = (pd.Timestamp.now() - data_investimento).days / 365.25
-    valor_corrigido_ipca = valor * (1 + ipca_acum)
-    valor_final = valor_corrigido_ipca * ((1 + adicional/100) ** anos)
-    return valor_final
 
 # ---------------------------------------------------------------
 # CONFIGURAÇÕES E INÍCIO DO CÓDIGO
@@ -360,12 +47,7 @@ def corrigir_ipca(valor, data_investimento, adicional=0.0):
 st.set_page_config(page_title="Primatech Investment Analyzer", layout="wide")
 
 # Inicializa variáveis da sessão para cenários
-if 'cenarios_disponiveis' not in st.session_state:
-    st.session_state.cenarios_disponiveis = list(carregar_cenarios().keys())
-if 'cenario_selecionado' not in st.session_state and st.session_state.cenarios_disponiveis:
-    st.session_state.cenario_selecionado = st.session_state.cenarios_disponiveis[0] if st.session_state.cenarios_disponiveis else ""
-if 'novo_cenario' not in st.session_state:
-    st.session_state.novo_cenario = ""
+inicializar_session_state_cenarios()
 
 col_title, col_hurdle_val = st.columns([3, 1])
 with col_title:
@@ -380,34 +62,8 @@ hurdle = st.slider("Taxa de Correção (IPCA + %)", 0.0, 15.0, 9.0, 0.5)
 fair_value, investimentos = carregar_dados()
 
 if fair_value is not None and investimentos is not None:
-    # Tabela base
-    df_empresas = investimentos[[
-        'Múltiplo',
-        'Empresa',
-        'Valor Investido até a presente data (R$ mil)',
-        'Participação do Fundo (%)',
-        'Data do Primeiro Investimento'
-    ]].copy()
-    df_empresas.rename(columns={'Valor Investido até a presente data (R$ mil)': 'Valor Investido'}, inplace=True)
-    
-    # Adicionamos "Fair Value" total (da planilha fair_value.xlsx)
-    if "Fair Value" not in df_empresas.columns:
-        df_empresas["Fair Value"] = np.nan
-    
-    # Adicionamos coluna de "Write-off" se não existir
-    if "Write-off" not in df_empresas.columns:
-        df_empresas["Write-off"] = False
-    
-    # Preenche Fair Value total do df_empresas
-    for i, row in df_empresas.iterrows():
-        emp = row["Empresa"]
-        match = fair_value.loc[
-            fair_value["Empresa"].str.upper() == emp.strip().upper()
-        ]
-        if not match.empty:
-            df_empresas.at[i, "Fair Value"] = match.iloc[0]["Valor Primatec (R$ mil)"]
-        else:
-            df_empresas.at[i, "Fair Value"] = np.nan
+    # Prepara os dados iniciais
+    df_empresas = preparar_dados_iniciais(fair_value, investimentos)
     
     # Se não existir no session_state, criamos; caso exista, não sobrescrevemos
     if 'edited_df' not in st.session_state:
@@ -497,7 +153,7 @@ if fair_value is not None and investimentos is not None:
             # Adiciona opção de write-off
             writeoff = st.checkbox(
                 "Write-off (perda total - múltiplo será 0)",
-                value=bool(current_row.get("Write-off", False)),  # Certifique-se de que está usando o valor do DataFrame
+                value=bool(current_row.get("Write-off", False)),
                 key=f"writeoff_{company_selected}",
                 on_change=toggle_writeoff,
                 help="Marque esta opção caso a empresa tenha sido um write-off (perda total)."
@@ -532,55 +188,12 @@ if fair_value is not None and investimentos is not None:
         active_investments = st.session_state.edited_df[
             st.session_state.edited_df['Múltiplo'] > 0
         ].copy()
-        analise_crescimento = pd.DataFrame()
         
-        for _, row in active_investments.iterrows():
-            valor_investido = row['Valor Investido']
-            valor_necessario = corrigir_ipca(
-                valor_investido,
-                row['Data do Primeiro Investimento'],
-                adicional=6.0
-            )
-            fair_value_total = row["Fair Value"]
-            pct_fundo = row['Participação do Fundo (%)']
-            if pd.notna(fair_value_total) and pct_fundo > 0:
-                fv_part = fair_value_total * (pct_fundo / 100.0)
-            else:
-                fv_part = np.nan
-            
-            multiplicador = row['Múltiplo']
-            # Removemos o cálculo de uplift_percent (Crescimento Necessário)
-            
-            sale_value = valor_investido * multiplicador
-            
-            analise_crescimento = pd.concat([
-                analise_crescimento,
-                pd.DataFrame({
-                    'Empresa': [row['Empresa']],
-                    'Valor Investido': [valor_investido],
-                    'FV Part.': [fv_part],
-                    'IPCA+6%': [valor_necessario],  # Renomeado de "IPCA+6%: Valor" para "IPCA+6%"
-                    'Participação do Fundo (%)': [pct_fundo],
-                    'Múltiplo': [multiplicador],
-                    'Sale': [sale_value],
-                    'Write-off': [row.get('Write-off', False)]
-                })
-            ])
-
-        # Modificação 2: Cálculo do Peso na Carteira
-        # Após o loop acima, adicionar:
-
-        valor_total_fv_part = analise_crescimento["FV Part."].sum()
-        if valor_total_fv_part != 0:
-            analise_crescimento["Peso na Carteira"] = (
-                analise_crescimento["FV Part."] / valor_total_fv_part
-            ) * 100
-        else:
-            analise_crescimento["Peso na Carteira"] = 0
+        # Usa a função modularizada para gerar análise de crescimento
+        analise_crescimento = gerar_analise_crescimento(active_investments, corrigir_ipca)
         
         with col_table2:
             st.markdown("**Tabela de Crescimento**")
-            analise_crescimento = analise_crescimento.round(2)
             st.dataframe(analise_crescimento.set_index('Empresa'))
         
         with col_graph:
@@ -594,76 +207,9 @@ if fair_value is not None and investimentos is not None:
                 if filtered.empty:
                     st.error("Nenhuma empresa encontrada para análise gráfica.")
                 else:
-                    linha = filtered.iloc[0]
-                    investido = linha['Valor Investido']
-                    fv_part = linha['FV Part.']
-                    necessario = linha['IPCA+6%']
-                    pct_fundo = linha['Participação do Fundo (%)']
-                    multiplicador = linha['Múltiplo']
-                    sale = linha['Sale']
-                    
-                    x_positions = ['Investido', 'FV Part.', 'IPCA+6%', 'Sale']
-                    bar_colors = ['#2196F3', '#FF9800', '#4CAF50', '#9C27B0']
-                    values = [investido, fv_part if pd.notna(fv_part) else 0, necessario, sale]
-                    
-                    # Calcula a relação em relação ao IPCA+6% de forma consistente
-                    fv_to_ipca_percent = "N/A"
-                    if pd.notna(fv_part) and necessario != 0:
-                        # Calcula quanto o FV Part. representa do IPCA+6%
-                        fv_to_ipca_value = (fv_part / necessario) * 100
-                        fv_to_ipca_percent = f"{fv_to_ipca_value:.2f}%"
-                    
-                    sale_to_ipca_percent = "N/A"
-                    if necessario != 0:
-                        # Calcula quanto o Sale representa do IPCA+6%
-                        sale_to_ipca_value = (sale / necessario) * 100
-                        sale_to_ipca_percent = f"{sale_to_ipca_value:.2f}%"
-                    
-                    # Encontrar o valor máximo para ajustar o intervalo do eixo Y
-                    max_value = max(values)
-                    
-                    # Criando um gráfico simplificado
-                    fig_uplift = go.Figure()
-                    
-                    # Adicionando barras com textos em branco e acima das barras
-                    for i, (x, y, color) in enumerate(zip(x_positions, values, bar_colors)):
-                        fig_uplift.add_trace(go.Bar(
-                            x=[x],
-                            y=[y],
-                            name=x,
-                            marker_color=color,
-                            text=f'R$ {format_brazil(y)}k',
-                            textposition='outside',  # Posiciona o texto acima da barra
-                            textfont=dict(color='white')  # Define a cor do texto como branco
-                        ))
-                    
-                    # Título com cálculos consistentes para ambos os indicadores
-                    title_text = f'<span style="color:white;">Análise de Uplift para {empresa_sel}</span><br>'
-                    # Agora ambos mostram a relação percentual com IPCA+6%
-                    title_text += f'<span style="color:#FF9800;">FV Part.</span><span style="color:white;"> → </span><span style="color:#4CAF50;">IPCA+6%</span><span style="color:white;">: {fv_to_ipca_percent}</span><br>'
-                    title_text += f'<span style="color:#9C27B0;">Sale</span><span style="color:white;"> → </span><span style="color:#4CAF50;">IPCA+6%</span><span style="color:white;">: {sale_to_ipca_percent}</span>'
-                    
-                    fig_uplift.update_layout(
-                        title={
-                            'text': title_text,
-                            'y': 0.95,
-                            'x': 0.5,
-                            'xanchor': 'center',
-                            'yanchor': 'top'
-                        },
-                        yaxis_title='Valores (R$ mil)',
-                        template='plotly_dark',
-                        margin=dict(t=150, r=50, b=100),  # Aumentar margem superior e inferior
-                        showlegend=False,
-                        barmode='group',
-                        height=550,  # Aumentar altura do gráfico
-                        # Configurar o intervalo do eixo Y para não cortar os valores
-                        yaxis=dict(
-                            range=[0, max_value * 1.15]  # Adiciona 15% de espaço acima do valor máximo
-                        )
-                    )
-                    
-                    st.plotly_chart(fig_uplift, use_container_width=True)
+                    fig_uplift = criar_grafico_uplift_empresa(empresa_sel, filtered)
+                    if fig_uplift:
+                        st.plotly_chart(fig_uplift, use_container_width=True)
         
         # -----------------------------------------------------------
         # Seção de Resultados da Carteira
@@ -727,17 +273,8 @@ if fair_value is not None and investimentos is not None:
         writeoffs = analise_crescimento[analise_crescimento['Write-off']]
         total_writeoff = writeoffs["Valor Investido"].sum() if not writeoffs.empty else 0.0
         
-        # Invertendo a ordem e dando espaço (bargap) entre as barras
-        fig_hurdle = go.Figure(data=[
-            go.Bar(name='Realizado', x=['Hurdle vs Realizado'], y=[total_sale], marker_color='light blue'),
-            go.Bar(name='Hurdle', x=['Hurdle vs Realizado'], y=[hurdle_nominal], marker_color='light green')
-        ])
-        fig_hurdle.update_layout(
-            barmode='group',
-            bargap= 0.4,  # <-- Ajuste do espaçamento entre as barras
-            template='plotly_dark',
-            title="Hurdle vs Realizado"
-        )
+        # Usar a função modularizada para criar o gráfico
+        fig_hurdle = criar_grafico_hurdle_vs_realizado(total_sale, hurdle_nominal, total_writeoff)
         st.plotly_chart(fig_hurdle, use_container_width=True)
         
         # Adiciona informação sobre write-offs
@@ -753,104 +290,26 @@ if fair_value is not None and investimentos is not None:
         # NOVO: Adicionando o gráfico de Análise de Aportes no Tempo como expander na segunda coluna
         with st.expander("Análise de Aportes no Tempo - Soma Cumulativa", expanded=False):
             try:
-                caminho_parcelas = os.path.join(DIRETORIO_DADOS, 'data_investimentos.xlsx')
-                df_parcelas = pd.read_excel(caminho_parcelas)
-                df_parcelas["Data Investimento"] = pd.to_datetime(
-                    df_parcelas["Data Investimento"], 
-                    format="%d/%m/%Y", 
-                    errors="coerce"
-                )
-                min_date = df_parcelas["Data Investimento"].min()
+                # Carrega os dados de parcelas usando a função modularizada
+                df_parcelas = carregar_parcelas_investimento()
+                
+                if not df_parcelas.empty:
+                    fig_temp = criar_grafico_aportes_no_tempo(df_parcelas)
+                    if fig_temp:
+                        st.plotly_chart(fig_temp, use_container_width=True)
+                    else:
+                        st.warning("Não há dados suficientes para exibir o gráfico cumulativo de investimentos.")
+                else:
+                    st.warning("Não há dados suficientes para exibir o gráfico cumulativo de investimentos.")
             except Exception as e:
-                st.error(f"Erro ao carregar data_investimentos.xlsx: {e}")
-                df_parcelas = pd.DataFrame(columns=["Empresa","Setor","Data Investimento","Valor Investido"])
-                min_date = datetime(1900, 1, 1)
-
-            current_month_first = pd.to_datetime(datetime.now().strftime("%Y-%m-01"))
-
-            if df_parcelas.empty:
-                st.warning("Não há dados em data_investimentos.xlsx para exibir o gráfico cumulativo de investimentos.")
-            else:
-                df_parcelas["Valor Investido"] = (
-                    df_parcelas["Valor Investido"]
-                    .astype(str)
-                    .str.replace("R\\$","", regex=True)
-                    .str.replace("\\.","", regex=True)
-                    .str.replace(",",".", regex=True)
-                )
-                df_parcelas["Valor Investido"] = pd.to_numeric(df_parcelas["Valor Investido"], errors="coerce")
-
-                df_agrupado = df_parcelas.groupby("Data Investimento", as_index=False)["Valor Investido"].sum()
-                df_agrupado.sort_values("Data Investimento", inplace=True)
-                df_agrupado["SomaCumulativa"] = df_agrupado["Valor Investido"].cumsum()
-
-                daily_index = pd.date_range(start=min_date, end=current_month_first, freq='D')
-                df_agrupado.set_index("Data Investimento", inplace=True)
-                df_agrupado = df_agrupado.reindex(daily_index, method="ffill").fillna(0)
-                df_agrupado.index.name = "Data Investimento"
-
-                fig_temp = go.Figure()
-                fig_temp.add_trace(
-                    go.Scatter(
-                        x=daily_index,
-                        y=df_agrupado["SomaCumulativa"],
-                        mode='lines+markers',
-                        line=dict(color='orange'),
-                        marker=dict(color='orange'),
-                        name='Cumulativo'
-                    )
-                )
-                fig_temp.update_layout(
-                    title="Período de Investimentos (Trimestral) - Soma Cumulativa",
-                    xaxis_title="Data",
-                    xaxis=dict(
-                        type='date',
-                        range=[min_date, current_month_first],
-                        dtick="M3",
-                        tickformat="%b\n%Y",
-                        tickfont=dict(color='white')
-                    ),
-                    yaxis=dict(visible=False),
-                    template='plotly_dark'
-                )
-                st.plotly_chart(fig_temp, use_container_width=True)
+                st.error(f"Erro ao processar dados para o gráfico de aportes: {e}")
         
         # Adiciona gráfico para mostrar distribuição de vendas vs write-offs
         with st.expander("Distribuição de Vendas vs Write-offs", expanded=True):
-            # Separar empresas por status
-            writeoffs_df = st.session_state.edited_df[st.session_state.edited_df['Write-off'] == True]
-            vendas_df = st.session_state.edited_df[(st.session_state.edited_df['Write-off'] == False) & (st.session_state.edited_df['Múltiplo'] > 0)]
-            sem_saida_df = st.session_state.edited_df[(st.session_state.edited_df['Write-off'] == False) & (st.session_state.edited_df['Múltiplo'] == 0)]
+            fig_distrib, total_vendas, total_writeoffs, total_sem_saida = criar_grafico_distribuicao_portfolio(st.session_state.edited_df)
             
-            # Calcular totais
-            total_writeoffs = writeoffs_df['Valor Investido'].sum() if not writeoffs_df.empty else 0
-            total_vendas = vendas_df.apply(lambda row: row['Valor Investido'] * row['Múltiplo'], axis=1).sum() if not vendas_df.empty else 0
-            total_sem_saida = sem_saida_df['Valor Investido'].sum() if not sem_saida_df.empty else 0
-            
-            # Criar dados para gráfico de pizza
-            labels = ['Vendas', 'Write-offs', 'Sem Saída']
-            values = [total_vendas, total_writeoffs, total_sem_saida]
-            colors = ['#4CAF50', '#F44336', '#2196F3']
-            
-            # Filtrar valores zerados
-            non_zero_indices = [i for i, v in enumerate(values) if v > 0]
-            filtered_labels = [labels[i] for i in non_zero_indices]
-            filtered_values = [values[i] for i in non_zero_indices]
-            filtered_colors = [colors[i] for i in non_zero_indices]
-            
-            if filtered_values:
-                fig = go.Figure(data=[go.Pie(
-                    labels=filtered_labels,
-                    values=filtered_values,
-                    marker_colors=filtered_colors,
-                    textinfo='value+percent',
-                    hole=.3,
-                )])
-                fig.update_layout(
-                    title="Distribuição do Valor de Portfólio",
-                    template='plotly_dark'
-                )
-                st.plotly_chart(fig, use_container_width=True)
+            if fig_distrib:
+                st.plotly_chart(fig_distrib, use_container_width=True)
                 
                 # Adiciona explicação dos valores
                 st.markdown(f"""
@@ -864,67 +323,14 @@ if fair_value is not None and investimentos is not None:
         
         with st.expander("Participação do Fundo por Empresa", expanded=False):
             df_ativos = st.session_state.edited_df[st.session_state.edited_df['Múltiplo'] > 0]
-            fig_port = go.Figure(data=[go.Bar(
-                x=df_ativos['Empresa'],
-                y=df_ativos['Participação do Fundo (%)'],
-                marker_color='#4CAF50'
-            )])
-            fig_port.update_layout(
-                xaxis_title="Empresa",
-                yaxis_title="Participação do Fundo (%)",
-                template='plotly_dark'
-            )
+            fig_port = criar_grafico_participacao_fundo(df_ativos)
             st.plotly_chart(fig_port, use_container_width=True)
         
-        def plot_comparativo(valores_corrigidos, cor_corrigido, label_corrigido):
-            empresas = investimentos_ativos['Empresa']
-            valores_investidos = investimentos_ativos['Valor Investido']
-            fig = go.Figure(data=[
-                go.Bar(
-                    x=empresas,
-                    y=valores_investidos,
-                    name='Valor Investido',
-                    marker_color='#2196F3'
-                ),
-                go.Bar(
-                    x=empresas,
-                    y=valores_corrigidos,
-                    name=label_corrigido,
-                    marker_color=cor_corrigido
-                )
-            ])
-            fig.update_layout(
-                yaxis_title='Valores (R$ mil)',
-                xaxis_tickangle=-90,
-                barmode='group',
-                template='plotly_dark'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
         with st.expander(f"Comparativo: Valor Aprovado vs Valor Investido (Total Investido: R$ {total_investido:.2f} MM)", expanded=False):
-            empresas = investimentos_ativos['Empresa']
             valores_aprovados = investimentos_ativos['Valor Aprovado em CI (R$ mil)']
-            valores_investidos = investimentos_ativos['Valor Investido']
-            
-            fig = go.Figure(data=[
-                go.Bar(
-                    x=empresas,
-                    y=valores_aprovados,
-                    name='Valor Aprovado',
-                    marker_color='#4CAF50'
-                ),
-                go.Bar(
-                    x=empresas,
-                    y=valores_investidos,
-                    name='Valor Investido',
-                    marker_color='#2196F3'
-                )
-            ])
-            fig.update_layout(
-                yaxis_title='Valores (R$ mil)',
-                xaxis_tickangle=-90,
-                barmode='group',
-                template='plotly_dark'
+            fig = criar_comparativo_valores(
+                investimentos_ativos, 
+                valores_aprovados=valores_aprovados
             )
             st.plotly_chart(fig, use_container_width=True)
         
@@ -936,11 +342,14 @@ if fair_value is not None and investimentos is not None:
                 ),
                 axis=1
             )
-            plot_comparativo(
+            fig = plot_comparativo(
+                investimentos_ativos['Empresa'],
+                investimentos_ativos['Valor Investido'],
                 investimentos_ativos['Valor Corrigido IPCA'],
                 '#FF5722',
                 'Valor Corrigido'
             )
+            st.plotly_chart(fig, use_container_width=True)
         
         with st.expander(f"Montante Total Investido Corrigido pelo IPCA+6% (R$ {total_ipca_6:.2f} MM)", expanded=False):
             investimentos_ativos['Valor Corrigido IPCA+6%'] = investimentos_ativos.apply(
@@ -951,11 +360,14 @@ if fair_value is not None and investimentos is not None:
                 ),
                 axis=1
             ).round(2)
-            plot_comparativo(
+            fig = plot_comparativo(
+                investimentos_ativos['Empresa'],
+                investimentos_ativos['Valor Investido'],
                 investimentos_ativos['Valor Corrigido IPCA+6%'],
                 '#9C27B0',
                 'Valor Corrigido'
             )
+            st.plotly_chart(fig, use_container_width=True)
         
         with st.expander(f"Montante Total Investido Corrigido pelo IPCA+{hurdle}% (R$ {total_ipca_hurdle:.2f} MM)", expanded=False):
             investimentos_ativos['Valor Corrigido IPCA+Hurdle'] = investimentos_ativos.apply(
@@ -966,8 +378,11 @@ if fair_value is not None and investimentos is not None:
                 ),
                 axis=1
             ).round(2)
-            plot_comparativo(
+            fig = plot_comparativo(
+                investimentos_ativos['Empresa'],
+                investimentos_ativos['Valor Investido'],
                 investimentos_ativos['Valor Corrigido IPCA+Hurdle'],
                 '#3F51B5',
                 'Valor Corrigido'
             )
+            st.plotly_chart(fig, use_container_width=True)
